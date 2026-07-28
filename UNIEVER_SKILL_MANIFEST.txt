@@ -1,0 +1,7 @@
+7eba2f465d924f03091c7c95ca303023ea91077bbebbdfcdba394021f52bf689  ./test-driven-development/SKILL.md
+1404219454b0f36cdeafddf40c29acde42d919583d9dcbefc5ff06fd422b6493  ./uniever-development-standard/SKILL.md
+88cfc22f516dda4b4c66470b67a17cda527bce4eae06fdf8915bffee5bc6a45a  ./karpathy-guidelines/SKILL.md
+51b7349e77ec63b7744a6f63647e7566a0b4d2e301121cc10e8c2113af6556a2  ./webapp-testing/SKILL.md
+d70604c94450f3e43326ba7ac0a7f1204de8b6ad588085c5dc6e11632541d3d4  ./frontend-design/SKILL.md
+052a1e943b4e8af9ec560e985a6e304f99bb4a619fb461a9fa80eab800e4617b  ./verification-before-completion/SKILL.md
+98fc73a30a2f349f4d753b1d5523405e00d2674cc0e502d1309eebe5379eb865  ./dev-standard-control-tower/SKILL.md
