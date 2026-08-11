@@ -419,6 +419,28 @@ def summarize(req: SummReq):
     return {"ok": True, "results": results}
 
 
+# ───────────────────────── (G3) 브리프 → BookPlan 생성 하네스 ─────────────────────────
+class PlanIn(BaseModel):
+    brief: str = ""
+    book_state: Optional[dict] = None
+    retries: int = 2
+
+
+@app.post("/api/plan")
+def plan(req: PlanIn):
+    """브리프 → 검증된 BookPlan(JSON). 서버 설정 LLM을 llm_fn 으로 감싸 planner 하네스에 주입한다.
+    적용(카드 생성)은 G4 프론트 브리지에서. 여기서는 계획만 만든다."""
+    from server.intent import planner
+
+    def llm_fn(msgs: list) -> Optional[str]:
+        try:
+            return _llm_chat(msgs, max_tokens=1500, temperature=0.3)
+        except Exception:
+            return None
+
+    return planner.make_plan(req.brief, llm_fn, req.book_state, retries=req.retries)
+
+
 if EBOOKS.exists():
     app.mount("/ebooks", StaticFiles(directory=str(EBOOKS), html=True), name="ebooks")
 DECK_OUT = EBOOK_HTML / "_deck_out"
