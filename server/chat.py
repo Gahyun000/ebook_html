@@ -9,6 +9,7 @@ PM 도메인 계층(recipes·navigation·ui_actions)은 중립화한 대화형 �
 from __future__ import annotations
 
 import json
+import re
 import urllib.request
 import urllib.error
 from typing import Iterator, Optional
@@ -185,6 +186,25 @@ def _call_llm(messages: list[dict], s: dict) -> Optional[str]:
         return None
 
 
+# ── 생성 레인(G4) — 빈 이북에서 '초안/기획/이북 만들기' → planner 로 초안 생성 ──
+_CREATE_EXPLICIT = re.compile(r"(초안|기획안|기획해|기획서|기획\s*좀|목차\s*짜|이북\s*짜|이북\s*기획)")
+_CREATE_MAKE = re.compile(r"이북.{0,6}(만들|생성|써|작성|제작)")
+
+
+def _detect_create_brief(message: str, book_state: Optional[dict]) -> Optional[str]:
+    """생성 레인 트리거. 초안/기획 명시어가 있거나, 이북이 비어있는데 '이북 만들어' 류면 브리프로 본다.
+    (내용이 있는 이북의 '이북 만들어/뽑아'는 PDF 빌드(make_ebook)로 두어 충돌을 피한다.)"""
+    s = (message or "").strip()
+    if not s:
+        return None
+    pages = (book_state or {}).get("pages") or []
+    if _CREATE_EXPLICIT.search(s):
+        return s
+    if _CREATE_MAKE.search(s) and len(pages) <= 1:
+        return s
+    return None
+
+
 def respond(message: str, session_id: Optional[str], confirm: Optional[bool] = None,
             confirm_action_id: Optional[str] = None, book_state: Optional[dict] = None) -> dict:
     """한 번의 대화 응답. ChatAnswer 계약과 동일한 dict 반환.
@@ -211,6 +231,23 @@ def respond(message: str, session_id: Optional[str], confirm: Optional[bool] = N
     s = load_llm_settings()
     # 모호할 때만 쓰는 동기 LLM 분류기(미설정이면 None → 규칙만, mock 폴백)
     llm_fn = (lambda msgs: _call_llm(msgs, s)) if s.get("configured") else None
+
+    # 생성 레인(G4): 브리프 → planner → 카드 통째로 적용(apply_book_plan)
+    if ACTIONS_ENABLED:
+        brief = _detect_create_brief(message, book_state)
+        if brief:
+            from server.intent import planner
+            pres = planner.make_plan(brief, llm_fn, book_state)
+            plan = pres["plan"]
+            warns = pres["warnings"]
+            n = len(plan["pages"])
+            kinds = " · ".join(p["cardKey"] for p in plan["pages"])
+            src = "초안" if pres["source"] == "llm" else "기본 골격"
+            note = ("\n\n⚠ 확인이 필요해요: " + " / ".join(warns[:3])) if warns else ""
+            reply = (f"‘{plan['title']}’ {n}장짜리 {src}을 만들었어요: {kinds}.\n"
+                     f"화면에 바로 반영했어요 — 마음에 안 드는 부분은 말로 고쳐 주세요(예: ‘표지 더 강하게’).{note}")
+            ui = {"type": "apply_book_plan", "payload": {"plan": plan, "warnings": warns}, "auto_apply": True}
+            return _reply(sid, reply, ui_action=ui)
 
     # 의도 엔진(HELIX 재조준 이식) → ui_action / 되묻기
     if ACTIONS_ENABLED:
