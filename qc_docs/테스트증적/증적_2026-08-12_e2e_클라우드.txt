@@ -18,3 +18,20 @@
   - 앱 부트·렌더: 통과(실측 — 정상 마운트·오류0·핵심 UI 렌더).
   - import/pagination 자동 단언(REQ-F-003/004): 미수행 — 스모크 셀렉터 스테일(.chip/.fitem → ax-*). 테스트 갱신 필요(제품 결함 아님).
 후속: e2e/smoke·import_*_smoke 의 셀렉터를 현행 ax-*(팔레트=axth, 필름스트립=ax-film 하위)로 갱신 후 재실행.
+
+======================================================
+[추가 실측 — 스모크 스테일 정밀 규명 (클라우드)]
+현행 UI(AX 크롬) 대비 스모크 셀렉터/흐름 불일치 확정:
+  - 필름스트립 아이템: `.fitem` → 현행 `.axth` (src/builder/Filmstrip.tsx: axth/axth-list/axth-mini/axth-no)
+  - 상태 메시지: `.tb-status` → 현행 `.bt-msg` (src/builder/chrome/ClassicBar.tsx). (`.tb-status` 는 미렌더 TopBar 소속)
+  - 팔레트: 스모크 `.chip`(Palette.tsx) → 현행 렌더 안 됨. 기본 크롬은 chrome/*(TitleBar/MenuBar/ClassicBar)라 Palette 미마운트.
+  - 초기 시드 페이지: 스모크 기대 3(.fitem===3) → 현행 1(store pages 시작 [] + 기본 1장).
+  - import 진입점: 현행은 메뉴 기반. MenuBar '📄 HTML 가져오기' → ClassicBar.openImport() → hidden `input[type=file]`.click().
+[관측] 헤드리스에서 `setInputFiles('input[type=file]')` 직접 주입 시 페이지 수 불변(1→1), 상태·본문 변화 없음, 콘솔 오류 0.
+  → 현행 import UX가 메뉴 트리거 경유라, 구 스모크의 "hidden input 직접 주입" 구동 방식이 현행과 불일치.
+[판정] import/pagination 자동 검증은 **미수행** — 환경(브라우저)은 해소됨. 남은 건 e2e 스모크의 현행 UX 재작성(위 매핑 + 메뉴 트리거 구동). 제품 결함 여부는 본 세션 자동테스트로 단정하지 않음.
+[수정 스펙(후속)]
+  1) 셀렉터: .fitem→.axth, .tb-status→.bt-msg, .chip(팔레트)→현행 카드추가 UI 확인.
+  2) 시드 페이지 기대값 3→현행값.
+  3) import 구동: MenuBar '가져오기' 클릭 후 setInputFiles, 또는 ClassicBar openImport 경로로 파일 주입.
+  4) 대형 회귀 smoke.mjs(약40단언)는 다수 셀렉터 현행화 필요 — 별도 정비.
