@@ -54,6 +54,8 @@ The approved standard resolves sketch conflicts. In particular:
 6. **Execute narrowly.** Preserve user changes, follow existing repository patterns, reserve ports from the shared registry before generating launchers, install only approved locked dependencies, and keep external effects behind explicit approval checkpoints.
 7. **Verify safely and independently.** Before tests, inspect available memory/CPU/GPU and set concurrency, timeout, data-size, cleanup, and stop limits that avoid system instability. Use deterministic checks and fresh execution evidence. An LLM's confidence, prose claim, or self-authored test alone is not acceptance.
 8. **Record.** Update the shared tabular development ledger for every work session, plus the document index, requirement trace, change history, test evidence, unresolved risks, and approval state. Write a technical document for core technology or engine work. Use KST 24-hour timestamps.
+9. **Keep the standard portable.** The standard-pack repository provides instructions and contracts; a receiving agent performs the target project's domain work within approved scope.
+10. **Enforce the free/open-source boundary.** Do not auto-install or connect commercial, paid, subscription, credential-gated, or separately authenticated tools. Record candidate tools and mark unapproved or unverifiable tools `미적용`.
 
 ## User-request work ledger gate
 

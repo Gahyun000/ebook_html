@@ -56,6 +56,8 @@ If a lower-priority instruction conflicts with a higher-priority rule, do not ex
 6. For T1 or higher work, apply [하네스_엔지니어링_SKILL.md](references/source-standard/skills/하네스_엔지니어링_SKILL.md). For T2-T3, also apply [하네스_루프_엔지니어링_SKILL.md](references/source-standard/skills/하네스_루프_엔지니어링_SKILL.md).
 7. Before tests or automation, set explicit iteration, timeout, cost, concurrency, data-size, cleanup, and cancellation limits that avoid system instability.
 8. Record changes, tests, unresolved risks, approval state, and decisions in the project ledger or designated activity record using KST 24-hour timestamps.
+9. Treat the standard pack as portable instructions for a receiving agent; it does not perform a target project's domain work by itself.
+10. Default third-party tooling to free, open-source, publicly inspectable sources. Do not auto-install or connect commercial, paid, subscription, credential-gated, or separately authenticated tools.
 
 ## Mandatory user-request work ledger
 
