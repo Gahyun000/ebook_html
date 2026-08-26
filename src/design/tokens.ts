@@ -1,21 +1,13 @@
-// DESIGN.md 기반 디자인 토큰 (단일 원천)
+// design.md 색 토큰. 제목·표지=네이비, 본문=근검정, 브랜드 파랑/초록/앰버 + 콜아웃 틴트.
 export const colors = {
-  ink: '#111318', canvas: '#ffffff', muted: '#5b6270', line: '#e4e7ee',
-  accent: '#2f6df6',
+  ink: '#111318', text: '#111318', navy: '#0F1B3D',
+  canvas: '#ffffff', muted: '#5b6270', line: '#e6e8ee',
+  accent: '#2462EB', blue: '#2462EB', green: '#3E9E6E', amber: '#D98A2A',
+  // 콜아웃 (design.md §5): 틴트 배경 / 좌측 바
+  tintBlue: '#EAF1FE', tintGreen: '#E9F5EF', tintAmber: '#FBF0E1',
+  barBlue: '#2462EB', barGreen: '#3E9E6E', barAmber: '#D98A2A',
+  // 노트 배경·스티키용 파스텔(별도 역할, 유지)
   blockLime: '#dceeb1', blockLilac: '#e7e3fb', blockCream: '#f5edd8',
   blockMint: '#cdeacf', blockCoral: '#f4d2c1',
 } as const
-
-export const typography = {
-  displayXl: { fontSize: 86, fontWeight: 340, lineHeight: 1.0, letterSpacing: -1.72 },
-  displayLg: { fontSize: 64, fontWeight: 340, lineHeight: 1.1, letterSpacing: -0.96 },
-  headline:  { fontSize: 26, fontWeight: 540, lineHeight: 1.35, letterSpacing: -0.26 },
-  body:      { fontSize: 18, fontWeight: 320, lineHeight: 1.45, letterSpacing: -0.26 },
-  eyebrow:   { fontSize: 12, fontWeight: 700, lineHeight: 1.3, letterSpacing: 1.4 },
-} as const
-
-export const spacing = { xxs: 4, xs: 8, sm: 12, md: 16, lg: 24, xl: 32, xxl: 48, section: 96 } as const
-export const radius = { sm: 6, md: 8, lg: 24, xl: 32, pill: 9999 } as const
-
 export const fontStack = "-apple-system, 'Apple SD Gothic Neo', 'Malgun Gothic', Inter, system-ui, sans-serif"
-export const monoStack = "'JetBrains Mono', 'SF Mono', ui-monospace, Menlo, monospace"
