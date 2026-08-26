@@ -17,7 +17,7 @@ from server.intent.schemas import EbookSchema
 LlmFn = Callable[[list[dict]], Optional[str]]
 
 _SYSTEM_CLASSIFY = (
-    "당신은 이북 편집기 도우미의 의도 분류기입니다. 사용자 명령을 아래 '후보 의도' 중 하나로만 "
+    "당신은 이북 편집기 챗봇의 의도 분류기입니다. 사용자 명령을 아래 '후보 의도' 중 하나로만 "
     '분류하고 JSON 한 줄로만 답하세요. 반드시 {"intent": "<id>"} 형식. 목록 밖 의도·설명 금지.'
 )
 

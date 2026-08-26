@@ -2,20 +2,27 @@ import { create } from 'zustand'
 import { cardByKey } from '../cards/registry'
 import type { ImportedDoc } from '../import/htmlImport'
 import { polish } from '../builder/polish'
+import { dropHistory } from '../canvas/history'
 import type { ThemeName } from '../design/tokens'
 export type Orientation = 'portrait' | 'landscape'
 export type SizePreset = 's' | 'm' | 'l'
+export type PaperType = 'blank' | 'lined' | 'lined-narrow' | 'dotted' | 'grid'
 // G3/G4 — 서버 planner 가 내는 이북 설계. applyPlan 이 카드로 변환한다.
 export interface PlanPage { cardKey: string; fields?: Record<string, string> }
 export interface BookPlan { title?: string; orientation?: Orientation; theme?: ThemeName; pages: PlanPage[] }
-export interface FreeEl { id: number; type: string; x: number; y: number; w: number; h: number; text: string; color: string; fs: number; src?: string; bold?: boolean; tcolor?: string; rows?: number; cols?: number; cells?: string[][]; wa?: boolean; italic?: boolean; underline?: boolean; rot?: number; align?: 'left' | 'center' | 'right' }
-export interface Conn { from: number; to: number; bend?: { x: number; y: number } }
-export interface Stroke { points: [number, number][]; color: string; w: number }
-export type BlockType = 'h1' | 'h2' | 'text' | 'bullet' | 'divider' | 'toggle' | 'callout'
+// G5 — 부분 수정: 대상 페이지 필드만 덮어쓰기(edits) + 새 장 끝에 추가(adds).
+export interface PageEdit { pageId: number; fields: Record<string, string> }
+export interface PageAdd { cardKey: string; fields?: Record<string, string> }
+export interface FreeEl { id: number; type: string; x: number; y: number; w: number; h: number; text: string; color: string; fs: number; src?: string; bold?: boolean; tcolor?: string; rows?: number; cols?: number; cells?: string[][]; merges?: { r: number; c: number; rs: number; cs: number }[]; calign?: Record<string, 'left' | 'center' | 'right'>; cvalign?: Record<string, 'top' | 'middle' | 'bottom'>; cfs?: Record<string, number>; headRow?: boolean; wa?: boolean; italic?: boolean; underline?: boolean; rot?: number; align?: 'left' | 'center' | 'right'; gotoSeq?: number; blocks?: Block[]; flipH?: boolean; flipV?: boolean; opacity?: number; shadow?: boolean; reflect?: boolean; locked?: boolean; groupId?: number; borderColor?: string; borderWidth?: number }
+export interface Conn { from: number; to: number; bend?: { x: number; y: number }; kind?: 'straight' | 'ortho' | 'curve'; arrow?: 'end' | 'both' | 'none'; color?: string; width?: number; dash?: boolean }
+export interface Stroke { points: [number, number][]; color: string; w: number; hl?: boolean }
+export type BlockType = 'h1' | 'h2' | 'h3' | 'h4' | 'text' | 'bullet' | 'numbered' | 'todo' | 'divider' | 'toggle' | 'callout'
 export type CalloutTone = 'info' | 'key' | 'warn'
-export interface Block { id: number; type: BlockType; text: string; bold?: boolean; align?: 'left' | 'center' | 'right'; collapsed?: boolean; children?: Block[]; tone?: CalloutTone; color?: string; fs?: number }
-export interface Page { id: number; cardKey: string; fields: Record<string, string>; free: boolean; els: FreeEl[]; conns: Conn[]; strokes: Stroke[]; blocks?: Block[]; bg?: string; contd?: boolean; trans?: string }
-export interface CanvasData { els: FreeEl[]; conns: Conn[]; strokes: Stroke[] }
+export interface Block { id: number; type: BlockType; text: string; bold?: boolean; italic?: boolean; done?: boolean; align?: 'left' | 'center' | 'right'; collapsed?: boolean; children?: Block[]; tone?: CalloutTone; color?: string; fs?: number }
+export type PageRole = 'cover' | 'toc' | 'content' | 'back'
+export interface DeckTocItem { sectionId: string; markN?: string; title: string; summary?: string; pageNo: string }
+export interface Page { id: number; cardKey: string; fields: Record<string, string>; free: boolean; els: FreeEl[]; conns: Conn[]; strokes: Stroke[]; paper?: PaperType; blocks?: Block[]; detached?: string[]; bg?: string; contd?: boolean; trans?: string; role?: PageRole; sectionId?: string; pageNo?: string; tocItems?: DeckTocItem[] }
+export interface CanvasData { els: FreeEl[]; conns: Conn[]; strokes: Stroke[]; detached?: string[] }
 export interface BuilderState {
   title: string; orientation: Orientation; font: string; size: SizePreset; theme: ThemeName
   pages: Page[]; selectedPageId: number | null
@@ -23,6 +30,8 @@ export interface BuilderState {
   updateField: (pageId: number, key: string, value: string) => void
   removePage: (pageId: number) => void
   movePage: (pageId: number, dir: number) => void
+  /** 드래그 재정렬용: from 위치의 페이지를 빼서 to 위치에 끼워 넣는다(스왑 아님). */
+  reorderPage: (from: number, to: number) => void
   duplicatePage: (pageId: number) => void
   selectPage: (pageId: number) => void
   setTitle: (t: string) => void
@@ -39,13 +48,25 @@ export interface BuilderState {
   reorderEl: (pageId: number, elId: number, toFront: boolean) => void
   setCanvas: (pageId: number, data: CanvasData) => void
   updateConn: (pageId: number, index: number, bend: { x: number; y: number }) => void
+  patchConn: (pageId: number, index: number, patch: Partial<Conn>) => void
+  removeConn: (pageId: number, index: number) => void
   setBlocks: (pageId: number, blocks: Block[]) => void
+  setElBlocks: (pageId: number, elId: number, blocks: Block[]) => void
+  moveEls: (pageId: number, moves: { id: number; x: number; y: number }[]) => void
+  updateEls: (pageId: number, ids: number[], patch: Partial<FreeEl>) => void
+  transformEls: (pageId: number, items: { id: number; x?: number; y?: number; w?: number; h?: number; rot?: number }[]) => void
+  detachField: (pageId: number, key: string, box: { x: number; y: number; w: number; h: number; text: string; fs: number; tcolor?: string; bold?: boolean; align?: 'left' | 'center' | 'right' }) => number
+  detachBox: (pageId: number, key: string, box: { x: number; y: number; w: number; h: number; text: string; fs: number; tcolor?: string; bold?: boolean; align?: 'left' | 'center' | 'right'; fill?: string; borderColor?: string; borderWidth?: number }) => number
+  groupEls: (pageId: number, ids: number[]) => void
+  ungroupEls: (pageId: number, ids: number[]) => void
   setPageBg: (pageId: number, bg: string) => void
+  setPaper: (pageId: number, paper: PaperType) => void
   setPageTrans: (pageId: number, trans: string) => void
   importDoc: (doc: ImportedDoc) => void
   importDeckSlides: (urls: string[], title: string) => void
   importPages: (pages: Page[], title?: string) => void
   applyPlan: (plan: BookPlan) => void
+  applyPageEdits: (edits: PageEdit[], adds?: PageAdd[]) => void
   polishAll: () => void
   setCard: (pageId: number, cardKey: string, fields: Record<string, string>) => void
   summarizeNotes: () => Promise<{ ok: boolean; error?: string; count?: number }>
@@ -53,12 +74,75 @@ export interface BuilderState {
 let blockUid = 1
 export const newBlock = (type: BlockType = 'text', text = ''): Block => ({ id: blockUid++, type, text })
 let uid = 1
+let elUid = 100000
+// 자유 캔버스 요소 id 단일 발급원(mkFreeEl 포함 모두 여기서). reseedUids가 로드 때 이 카운터를 끌어올림.
+export function nextElId(): number { return elUid++ }
+// 새 페이지의 필드는 빈칸으로 시작한다.
+// registry 의 example 을 그대로 넣으면 같은 카드를 두 번 추가했을 때 글자까지 똑같은 페이지가 나오고,
+// 지우지 않은 예시 문구가 그대로 내보내기까지 따라간다.
+// 빈칸은 PageView 의 data-ph 자리표시자가 안내하므로 화면이 비어 보이지도 않는다.
+// (AI 경로 buildPlanPage 도 같은 이유로 빈칸을 쓴다 — 정책을 하나로 맞춘 것)
 function defaultsFor(cardKey: string): Record<string, string> {
   const c = cardByKey(cardKey); const f: Record<string, string> = {}
-  if (c) c.fields.forEach((fd) => { f[fd.key] = fd.example ?? '' })
+  if (c) c.fields.forEach((fd) => { f[fd.key] = '' })
   return f
 }
+// (G4/G5 공유) planner/editor 의 페이지 스펙 한 장을 실제 Page 로 만든다.
+// 미채운 필드는 예시 대신 빈칸(근거 없는 수치/문구 주입 방지). note 는 제목 블록으로.
+function buildPlanPage(sp: PlanPage | PageAdd): Page {
+  const cardKey = sp.cardKey
+  const given = sp.fields || {}
+  if (cardKey === 'note') {
+    const title = (given.title || '새 페이지').toString()
+    return { id: uid++, cardKey: 'note', fields: {}, free: false, els: [], conns: [], strokes: [], blocks: [{ ...newBlock('h1', title), bold: true }], bg: '' }
+  }
+  const empties: Record<string, string> = {}
+  const c = cardByKey(cardKey)
+  if (c) c.fields.forEach((fd) => { empties[fd.key] = '' })
+  const fields = { ...empties, ...given }
+  return { id: uid++, cardKey, fields, free: false, els: [], conns: [], strokes: [] }
+}
+const isPlannablePage = (cardKey: string) => cardKey === 'note' || cardKey === 'slide' || !!cardByKey(cardKey)
 const mapPage = (pages: Page[], id: number, fn: (p: Page) => Page) => pages.map((p) => (p.id === id ? fn(p) : p))
+function clonePageWithNewIds(src: Page): Page {
+  const copy: Page = JSON.parse(JSON.stringify(src))
+  copy.id = uid++
+  const idMap = new Map<number, number>()
+  copy.els = copy.els.map((el) => {
+    const nextId = elUid++
+    idMap.set(el.id, nextId)
+    return { ...el, id: nextId }
+  })
+  copy.conns = copy.conns.flatMap((conn) => {
+    const from = idMap.get(conn.from)
+    const to = idMap.get(conn.to)
+    return from && to ? [{ ...conn, from, to }] : []
+  })
+  return copy
+}
+// 저장된 프로젝트를 로드할 때, 그 안의 id들이 모듈 카운터(uid/elUid/blockUid)보다 크면
+// 새로 추가하는 요소가 기존 id와 충돌한다. 로드 직후 카운터를 최대 id 다음으로 끌어올린다.
+export function reseedUids(pages: Page[]): void {
+  let maxP = 0, maxEl = 0, maxBlk = 0
+  const walk = (bs?: Block[]) => { for (const b of bs || []) { if (b.id > maxBlk) maxBlk = b.id; walk(b.children) } }
+  for (const p of pages || []) {
+    if (p.id > maxP) maxP = p.id
+    for (const e of p.els || []) { if (e.id > maxEl) maxEl = e.id; walk(e.blocks) }
+    walk(p.blocks)
+  }
+  if (maxP >= uid) uid = maxP + 1
+  if (maxEl >= elUid) elUid = maxEl + 1
+  if (maxBlk >= blockUid) blockUid = maxBlk + 1
+  // 기존 데이터 치유: 한 페이지 안에서 중복된 요소 id는 새 id로 분리(2번째부터). 겹쳐 쌓이던 도형이 풀린다.
+  for (const p of pages || []) {
+    const seen = new Set<number>()
+    for (const e of p.els || []) {
+      if (seen.has(e.id)) e.id = elUid++
+      seen.add(e.id)
+    }
+  }
+}
+
 export const useBuilder = create<BuilderState>((set, get) => ({
   title: '유니에버 AX 사업모델', orientation: 'portrait', font: 'auto', size: 'm', theme: 'light',
   pages: [], selectedPageId: null,
@@ -70,21 +154,46 @@ export const useBuilder = create<BuilderState>((set, get) => ({
     }
     const p: Page = { id: uid++, cardKey, fields: defaultsFor(cardKey), free: false, els: [], conns: [], strokes: [] }
     if (cardKey === 'note') {
+      // 빈 제목 블록 + 빈 본문 블록. 안내 문구를 값으로 넣으면 페이지마다 같은 글이 박히고,
+      // 지우지 않으면 그대로 내보내진다. 사용법 안내는 블록 자리표시자가 맡는다.
       p.blocks = [
-        { ...newBlock('h1', '새 페이지 제목'), bold: true },
-        newBlock('text', '여기에 내용을 적어보세요. ‘/’로 블록을 추가하고, ‘>’로 접히는 토글을 만들 수 있어요.'),
+        { ...newBlock('h1', ''), bold: true },
+        newBlock('text', ''),
       ]
       p.bg = ''
     }
     return { pages: [...s.pages, p], selectedPageId: p.id }
   }),
   updateField: (pageId, key, value) => set((s) => ({ pages: mapPage(s.pages, pageId, (p) => ({ ...p, fields: { ...p.fields, [key]: value } })) })),
-  removePage: (pageId) => set((s) => { const pages = s.pages.filter((p) => p.id !== pageId); const sel = s.selectedPageId === pageId ? (pages.length ? pages[0].id : null) : s.selectedPageId; return { pages, selectedPageId: sel } }),
+  removePage: (pageId) => set((s) => {
+    dropHistory(pageId)
+    const at = s.pages.findIndex((p) => p.id === pageId)
+    const pages = s.pages.filter((p) => p.id !== pageId)
+    // 지운 자리의 다음(없으면 이전) 페이지로. 무조건 1페이지로 튀면 여러 장 정리할 때
+    // 매번 원래 보던 곳까지 다시 스크롤해 내려와야 한다.
+    let sel = s.selectedPageId
+    if (s.selectedPageId === pageId) {
+      sel = pages.length ? pages[Math.min(at, pages.length - 1)].id : null
+    }
+    return { pages, selectedPageId: sel }
+  }),
   movePage: (pageId, dir) => set((s) => { const i = s.pages.findIndex((p) => p.id === pageId); const j = i + dir; if (i < 0 || j < 0 || j >= s.pages.length) return {} as Partial<BuilderState>; const pages = [...s.pages]; const tmp = pages[i]; pages[i] = pages[j]; pages[j] = tmp; return { pages } }),
+  // movePage 는 인접 스왑이라 임의 위치 이동을 표현할 수 없다(28→3 이면 25번 눌러야 한다).
+  // 드래그 재정렬은 잘라내서 끼워 넣는 방식이어야 중간 페이지들의 상대 순서가 유지된다.
+  reorderPage: (from, to) => set((s) => {
+    const n = s.pages.length
+    if (from < 0 || from >= n) return {} as Partial<BuilderState>
+    const dest = Math.max(0, Math.min(n - 1, to))
+    if (dest === from) return {} as Partial<BuilderState>
+    const pages = [...s.pages]
+    const [moved] = pages.splice(from, 1)
+    pages.splice(dest, 0, moved)
+    return { pages }
+  }),
   duplicatePage: (pageId) => set((s) => {
     const i = s.pages.findIndex((p) => p.id === pageId); if (i < 0) return {} as Partial<BuilderState>
     const src = s.pages[i]
-    const copy: Page = JSON.parse(JSON.stringify(src)); copy.id = uid++
+    const copy = clonePageWithNewIds(src)
     const pages = [...s.pages]; pages.splice(i + 1, 0, copy)
     return { pages, selectedPageId: copy.id }
   }),
@@ -101,10 +210,33 @@ export const useBuilder = create<BuilderState>((set, get) => ({
   addConn: (pageId, conn) => set((s) => ({ pages: mapPage(s.pages, pageId, (p) => ({ ...p, conns: [...p.conns, conn] })) })),
   addStroke: (pageId, stroke) => set((s) => ({ pages: mapPage(s.pages, pageId, (p) => ({ ...p, strokes: [...p.strokes, stroke] })) })),
   reorderEl: (pageId, elId, toFront) => set((s) => ({ pages: mapPage(s.pages, pageId, (p) => { const i = p.els.findIndex((e) => e.id === elId); if (i < 0) return p; const els = [...p.els]; const e = els.splice(i, 1)[0]; if (toFront) els.push(e); else els.unshift(e); return { ...p, els } }) })),
-  setCanvas: (pageId, data) => set((s) => ({ pages: mapPage(s.pages, pageId, (p) => ({ ...p, els: data.els, conns: data.conns, strokes: data.strokes })) })),
+  setCanvas: (pageId, data) => set((s) => ({ pages: mapPage(s.pages, pageId, (p) => ({ ...p, els: data.els, conns: data.conns, strokes: data.strokes, ...(data.detached !== undefined ? { detached: data.detached } : {}) })) })),
   updateConn: (pageId, index, bend) => set((s) => ({ pages: mapPage(s.pages, pageId, (p) => ({ ...p, conns: p.conns.map((c, i) => (i === index ? { ...c, bend } : c)) })) })),
+  patchConn: (pageId, index, patch) => set((s) => ({ pages: mapPage(s.pages, pageId, (p) => ({ ...p, conns: p.conns.map((c, i) => (i === index ? { ...c, ...patch } : c)) })) })),
+  removeConn: (pageId, index) => set((s) => ({ pages: mapPage(s.pages, pageId, (p) => ({ ...p, conns: p.conns.filter((_, i) => i !== index) })) })),
   setBlocks: (pageId, blocks) => set((s) => ({ pages: mapPage(s.pages, pageId, (p) => ({ ...p, blocks })) })),
+  setElBlocks: (pageId, elId, blocks) => set((s) => ({ pages: mapPage(s.pages, pageId, (p) => ({ ...p, els: p.els.map((e) => (e.id === elId ? { ...e, blocks } : e)) })) })),
+  moveEls: (pageId, moves) => set((s) => ({ pages: mapPage(s.pages, pageId, (p) => ({ ...p, els: p.els.map((e) => { const m = moves.find((x) => x.id === e.id); return m ? { ...e, x: m.x, y: m.y } : e }) })) })),
+  updateEls: (pageId, ids, patch) => set((s) => ({ pages: mapPage(s.pages, pageId, (p) => ({ ...p, els: p.els.map((e) => (ids.includes(e.id) ? { ...e, ...patch } : e)) })) })),
+  transformEls: (pageId, items) => set((s) => ({ pages: mapPage(s.pages, pageId, (p) => ({ ...p, els: p.els.map((e) => { const m = items.find((x) => x.id === e.id); if (!m) return e; const patch: Partial<FreeEl> = {}; if (m.x != null) patch.x = m.x; if (m.y != null) patch.y = m.y; if (m.w != null) patch.w = m.w; if (m.h != null) patch.h = m.h; if (m.rot != null) patch.rot = m.rot; return { ...e, ...patch } }) })) })),
+  // 카드 항목을 그 자리 그대로 자유 텍스트 객체로 떼어낸다(템플릿에선 그 칸을 숨김).
+  detachField: (pageId, key, box) => {
+    const id = nextElId()
+    const el: FreeEl = { id, type: 'text', x: box.x, y: box.y, w: box.w, h: box.h, text: box.text, color: 'transparent', fs: box.fs, tcolor: box.tcolor, bold: box.bold, align: box.align }
+    set((s) => ({ pages: mapPage(s.pages, pageId, (p) => ({ ...p, els: [...p.els, el], detached: [...(p.detached || []), key] })) }))
+    return id
+  },
+  // 스타일 박스(플로우 단계·dsection 카드·스티키 등)를 배경·테두리째 통째로 떼어낸다.
+  detachBox: (pageId, key, box) => {
+    const id = nextElId()
+    const el: FreeEl = { id, type: 'box', x: box.x, y: box.y, w: box.w, h: box.h, text: box.text, color: box.fill && box.fill !== 'transparent' ? box.fill : 'transparent', fs: box.fs, tcolor: box.tcolor, bold: box.bold, align: box.align, borderColor: box.borderColor, borderWidth: box.borderWidth }
+    set((s) => ({ pages: mapPage(s.pages, pageId, (p) => ({ ...p, els: [...p.els, el], detached: [...(p.detached || []), key] })) }))
+    return id
+  },
+  groupEls: (pageId, ids) => set((s) => { const gid = nextElId(); return { pages: mapPage(s.pages, pageId, (p) => ({ ...p, els: p.els.map((e) => (ids.includes(e.id) ? { ...e, groupId: gid } : e)) })) } }),
+  ungroupEls: (pageId, ids) => set((s) => ({ pages: mapPage(s.pages, pageId, (p) => ({ ...p, els: p.els.map((e) => (ids.includes(e.id) ? { ...e, groupId: undefined } : e)) })) })),
   setPageBg: (pageId, bg) => set((s) => ({ pages: mapPage(s.pages, pageId, (p) => ({ ...p, bg })) })),
+  setPaper: (pageId, paper) => set((s) => ({ pages: mapPage(s.pages, pageId, (p) => ({ ...p, paper })) })),
   setPageTrans: (pageId, trans) => set((s) => ({ pages: mapPage(s.pages, pageId, (p) => ({ ...p, trans })) })),
   importDoc: (doc) => set(() => {
     const mk = (cardKey: string, fields: Record<string, string>, extra: Partial<Page> = {}): Page =>
@@ -134,22 +266,9 @@ export const useBuilder = create<BuilderState>((set, get) => ({
     return { pages, selectedPageId: pages[0] ? pages[0].id : null, title: title || s.title }
   }),
   // (G4) 서버 planner 의 BookPlan 을 실제 카드로 변환해 전체 교체(빈 이북에서 한 번에 초안 완성).
-  // 미채운 필드는 예시 대신 빈칸 → 근거 없는 수치/문구 주입 방지. note 는 제목 블록으로.
   applyPlan: (plan) => set((s) => {
-    const valid = (plan.pages || []).filter((sp) => sp && (sp.cardKey === 'note' || sp.cardKey === 'slide' || !!cardByKey(sp.cardKey)))
-    const pages: Page[] = valid.map((sp) => {
-      const cardKey = sp.cardKey
-      const given = sp.fields || {}
-      if (cardKey === 'note') {
-        const title = (given.title || '새 페이지').toString()
-        return { id: uid++, cardKey: 'note', fields: {}, free: false, els: [], conns: [], strokes: [], blocks: [{ ...newBlock('h1', title), bold: true }], bg: '' }
-      }
-      const empties: Record<string, string> = {}
-      const c = cardByKey(cardKey)
-      if (c) c.fields.forEach((fd) => { empties[fd.key] = '' })
-      const fields = { ...empties, ...given }
-      return { id: uid++, cardKey, fields, free: false, els: [], conns: [], strokes: [] }
-    })
+    const valid = (plan.pages || []).filter((sp) => sp && isPlannablePage(sp.cardKey))
+    const pages: Page[] = valid.map(buildPlanPage)
     return {
       pages,
       selectedPageId: pages.length ? pages[0].id : null,
@@ -157,6 +276,24 @@ export const useBuilder = create<BuilderState>((set, get) => ({
       orientation: plan.orientation || s.orientation,
       theme: plan.theme || s.theme,
     }
+  }),
+  // (G5) 부분 수정: 대상 페이지의 '주어진 필드 키'만 덮어쓰고(나머지 값·다른 페이지는 그대로), adds 는 끝에 추가.
+  // diff 기반 — 되돌리기(undo)로 안전망. edits 는 존재하는 페이지에만 적용(환각 pageId 무시).
+  applyPageEdits: (edits, adds) => set((s) => {
+    let pages = s.pages
+    if (edits && edits.length) {
+      const byId = new Map(edits.map((e) => [e.pageId, e.fields || {}]))
+      pages = pages.map((p) => (byId.has(p.id) ? { ...p, fields: { ...p.fields, ...byId.get(p.id) } } : p))
+    }
+    let sel = s.selectedPageId
+    if (adds && adds.length) {
+      const newPages = adds.filter((a) => a && isPlannablePage(a.cardKey)).map(buildPlanPage)
+      if (newPages.length) {
+        pages = [...pages, ...newPages]
+        sel = newPages[0].id  // 추가한 첫 장으로 이동(결과를 바로 확인)
+      }
+    }
+    return { pages, selectedPageId: sel }
   }),
   polishAll: () => set((s) => ({
     pages: s.pages.map((p) => ({

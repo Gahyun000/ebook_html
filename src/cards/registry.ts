@@ -31,5 +31,15 @@ export const CARD_REGISTRY: CardDef[] = [
     fields: [f('title', '제목', '아이디어 메모'), f('n1', '메모 1', '현장 니즈 인터뷰'), f('n2', '메모 2', 'PoC 대상 라인'), f('n3', '메모 3', 'ROI 계산'), f('n4', '메모 4 (선택)')] },
   { key: 'board', group: 'viz', label: '자유 메모 보드', title: '자유 보드', viz: 'board',
     fields: [f('title', '제목', '자유 보드'), f('n1', '메모 1', '핵심 가설'), f('n2', '메모 2', '리스크'), f('n3', '메모 3', '다음 액션'), f('n4', '메모 4', '질문'), f('n5', '메모 5 (선택)'), f('n6', '메모 6 (선택)')] },
+  { key: 'dsection', group: 'extra', label: '덱 섹션', title: '섹션',
+    fields: [f('markN', '번호', '01'), f('title', '제목', '제조 현장의 활용 분야'),
+      { key: 'sub', label: '부제', example: '현장 데이터를 하나의 흐름으로 모읍니다.', textarea: true },
+      f('cols', '열 수 (2/3)', '3'),
+      f('c1', '카드 1 (제목|설명)', '품질|찾고·보고·판정합니다'),
+      f('c2', '카드 2 (제목|설명)', '지식|흩어진 문서를 답으로'),
+      f('c3', '카드 3 (제목|설명)', '설비|예측하고 지시서까지'),
+      f('c4', '카드 4 (제목|설명)', '경영|숫자를 판단 가능한 요약으로'),
+      f('c5', '카드 5 (선택)', ''),
+      f('c6', '카드 6 (선택)', '')] },
 ]
 export const cardByKey = (key: string) => CARD_REGISTRY.find((c) => c.key === key)

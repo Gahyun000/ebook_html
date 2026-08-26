@@ -1,6 +1,6 @@
 # ebook_html 문서 인덱스 (UDS-110 §3)
 
-경영진 틀 빌더(EVER-FRAME). 카드 조립 + 자유 캔버스로 사업모델을 이북/덱으로 내보낸다.
+경영진 스케치 빌더(EVER-SKETCH). 카드 조립 + 자유 캔버스로 사업모델을 이북/덱으로 내보낸다.
 산출물(PNG 폴더)은 `uniever_ebook`의 `generator.py`로 이북 빌드 — **uniever_ebook 무수정**.
 
 ## 표준 폴더 (UDS-110)

@@ -1,13 +1,13 @@
-import { useEffect, useRef } from 'react'
+import { useEffect } from 'react'
 import Layout from './builder/Layout'
-import { useBuilder } from './state/store'
+import LibraryScreen from './persistence/LibraryScreen'
+import { useProjects } from './persistence/projects'
+import { installAutosave } from './persistence/autosave'
+
 export default function App() {
-  const addCard = useBuilder((s) => s.addCard)
-  const seeded = useRef(false)
-  useEffect(() => {
-    if (seeded.current) return
-    seeded.current = true
-    addCard('slide')  // 구글 슬라이드식: 빈 슬라이드 한 장으로 시작
-  }, [addCard])
-  return <Layout />
+  const view = useProjects((s) => s.view)
+  const boot = useProjects((s) => s.boot)
+  useEffect(() => { installAutosave(); void boot() }, [boot])
+  // 앱 진입점: 기본은 '내 이북' 라이브러리, 프로젝트를 열면 편집 화면.
+  return view === 'editor' ? <Layout /> : <LibraryScreen />
 }

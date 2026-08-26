@@ -2,9 +2,23 @@ import { useState, useEffect, useRef } from 'react'
 import type { ChangeEvent, CSSProperties } from 'react'
 import { useBuilder } from '../state/store'
 import { exportBook } from '../export/exportBook'
+import { exportPdf } from '../export/exportFiles'
+import { exportPptx } from '../export/exportPptx'
+import { pageSize } from '../cards/sizing'
+import { getActiveProjectId } from '../persistence/session'
+import { useProjects } from '../persistence/projects'
 import { parseHtml } from '../import/htmlImport'
 import type { ImportedDoc } from '../import/htmlImport'
 import { deckIrToPages } from '../import/deckToPages'
+import { paginate } from '../import/paginate'
+
+// EVER-FOLIO(uniever_ebook 이북 라이브러리) — 형제 앱. run.command 가 8811 로 같이 띄운다.
+const FOLIO_URL = 'http://127.0.0.1:8811'
+const switchChip: CSSProperties = {
+  display: 'inline-flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap',
+  border: '1.4px solid #cfe0ff', background: '#eef4ff', color: '#2462EB',
+  borderRadius: 9999, padding: '7px 13px', fontWeight: 800, fontSize: 13, textDecoration: 'none',
+}
 
 type Preview = {
   name: string
@@ -24,6 +38,11 @@ export default function TopBar({ onHelp, onPresent, onSettings, onDemo, onAiClea
   const setTitle = useBuilder((s) => s.setTitle)
   const orientation = useBuilder((s) => s.orientation)
   const setOrientation = useBuilder((s) => s.setOrientation)
+  const theme = useBuilder((s) => s.theme)
+  const setTheme = useBuilder((s) => s.setTheme)
+  const size = useBuilder((s) => s.size)
+  const font = useBuilder((s) => s.font)
+  const summarizeNotes = useBuilder((s) => s.summarizeNotes)
   const pages = useBuilder((s) => s.pages)
   const importDoc = useBuilder((s) => s.importDoc)
   const importDeckSlides = useBuilder((s) => s.importDeckSlides)
@@ -65,7 +84,12 @@ export default function TopBar({ onHelp, onPresent, onSettings, onDemo, onAiClea
     if (!preview) return
     if (preview.ir && preview.ir.pages && preview.ir.pages.length) {
       setOrientation('portrait')  // 덱은 3:4
+      const th = (preview.ir.meta as { theme?: string } | undefined)?.theme
+      if (th === 'dark' || th === 'light') setTheme(th)
       importPages(deckIrToPages(preview.ir as never, 'portrait'), preview.name)
+    } else if (preview.editableDoc && preview.editableDoc.sections && preview.editableDoc.sections.length) {
+      setOrientation('portrait')
+      importDoc(paginate(preview.editableDoc, 'portrait', size, font))
     } else if (preview.thumbs && preview.thumbs.length) {
       importDeckSlides(preview.thumbs, preview.name)
     } else if (preview.editableDoc) {
@@ -79,25 +103,56 @@ export default function TopBar({ onHelp, onPresent, onSettings, onDemo, onAiClea
     if (!pages.length) { setStatus('카드를 먼저 추가하세요'); return }
     setStatus('이북 만드는 중...'); setUrl(undefined)
     try {
-      const data = await exportBook(pages, { title, orientation })
-      if (data.ok) { setStatus('완료!'); setUrl(data.url) } else setStatus('실패: ' + (data.error || ''))
+      const data = await exportBook(pages, { title, orientation, theme }, getActiveProjectId() || undefined)
+      if (data.ok) { setStatus('완료!'); setUrl(data.url); void useProjects.getState().loadList() } else setStatus('실패: ' + (data.error || ''))
     } catch (e) { setStatus('오류: ' + (e instanceof Error ? e.message : String(e))) }
   }
+  async function onSummarize() {
+    setStatus('AI 요약 중… (LLM 게이트웨이 호출)')
+    const r = await summarizeNotes()
+    setStatus(r.ok ? `AI 요약 완료 (${r.count}장)` : '요약 실패: ' + (r.error || ''))
+  }
+
+  async function doExportPdf() {
+    if (!pages.length) { setStatus('카드를 먼저 추가하세요'); return }
+    setStatus('PDF 만드는 중…')
+    try { const r = await exportPdf(pages, title); setStatus(r === 'canceled' ? '취소됨' : 'PDF 저장 완료') }
+    catch (e) { setStatus('PDF 오류: ' + (e instanceof Error ? e.message : String(e))) }
+  }
+  async function doExportPptx() {
+    if (!pages.length) { setStatus('카드를 먼저 추가하세요'); return }
+    setStatus('PPT 만드는 중…')
+    try { const { W, H } = pageSize(orientation); const r = await exportPptx(pages, { title, W, H }); setStatus(r === 'canceled' ? '취소됨' : 'PPT 저장 완료') }
+    catch (e) { setStatus('PPT 오류: ' + (e instanceof Error ? e.message : String(e))) }
+  }
+
   const makeRef = useRef(make)
   makeRef.current = make
+  const pdfRef = useRef(doExportPdf); pdfRef.current = doExportPdf
+  const pptxRef = useRef(doExportPptx); pptxRef.current = doExportPptx
   useEffect(() => {
     const h = () => { void makeRef.current() }
+    const hp = () => { void pdfRef.current() }
+    const hx = () => { void pptxRef.current() }
     window.addEventListener('ebook:build', h)
-    return () => window.removeEventListener('ebook:build', h)
+    window.addEventListener('ebook:export-pdf', hp)
+    window.addEventListener('ebook:export-pptx', hx)
+    return () => { window.removeEventListener('ebook:build', h); window.removeEventListener('ebook:export-pdf', hp); window.removeEventListener('ebook:export-pptx', hx) }
   }, [])
 
   return (<div className="top">
-    <div className="brand">틀 빌더<small>경영진용</small></div>
+    <div className="brand">EVER-SKETCH<small>경영진용</small></div>
+    <a className="switch-chip" style={switchChip} href={FOLIO_URL} target="_blank" rel="noreferrer"
+       title="EVER-FOLIO(이북 라이브러리) 열기 — 127.0.0.1:8811">↗ EVER-FOLIO</a>
     <input className="title-in" value={title} onChange={(e) => setTitle(e.target.value)} />
     <div className="spacer" />
     <div className="seg">
       <button className={orientation === 'portrait' ? 'on' : ''} onClick={() => setOrientation('portrait')}>세로 이북</button>
       <button className={orientation === 'landscape' ? 'on' : ''} onClick={() => setOrientation('landscape')}>가로 덱</button>
+    </div>
+    <div className="seg" title="이북 테마 — EVER-PEAK 라이트/다크" style={{ marginRight: 2 }}>
+      <button className={theme === 'light' ? 'on' : ''} onClick={() => setTheme('light')}>☀ 라이트</button>
+      <button className={theme === 'dark' ? 'on' : ''} onClick={() => setTheme('dark')}>🌙 다크</button>
     </div>
     <div className="seg" title="가져올 덱 테마" style={{ marginRight: 2 }}>
       <button className={deckTheme === 'light' ? 'on' : ''} onClick={() => setDeckTheme('light')}>라이트</button>
@@ -106,6 +161,7 @@ export default function TopBar({ onHelp, onPresent, onSettings, onDemo, onAiClea
     <button className="help-btn" onClick={() => fileRef.current?.click()} title="HTML을 깔끔한 덱으로 변환 → 미리보기 후 캔버스로">📄 HTML 가져오기</button>
     <input ref={fileRef} type="file" accept=".html,.htm,text/html" style={{ display: 'none' }} onChange={onImportFile} />
     <button className="help-btn" onClick={onAiCleanup} title="가져온 결과를 규칙으로 다듬기(제안→수락)">✨ AI로 정리</button>
+    <button className="help-btn" onClick={onSummarize} title="본문을 EVER-PEAK식으로 LLM 요약(⚙ 환경설정 필요)">✨ AI 요약</button>
     <button className="help-btn" onClick={onDemo} title="예시영상 — 만드는 법 보기">▶ 예시영상</button>
     <button className="present-btn" onClick={onPresent} title="구글 슬라이드식 슬라이드쇼">▷ 슬라이드쇼</button>
     <button className="help-btn" onClick={onSettings} title="환경설정(LLM)">⚙ 환경설정</button>

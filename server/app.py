@@ -17,9 +17,11 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from server.settings_store import (
-    init_db, load_llm_settings, save_llm_settings, mask_key, llm_endpoint,
+    init_db, load_llm_settings, save_llm_settings, mask_key, llm_endpoint, llm_configured,
 )
 from server import chat as chat_engine
+from server import projects as projects_store
+from server import notes as notes_store
 
 HERE = pathlib.Path(__file__).resolve().parent
 EBOOK_HTML = HERE.parent
@@ -55,6 +57,7 @@ class BuildReq(BaseModel):
     theme: str = "light"
     pages: List[Page]
     hotspots: List[Hotspot] = []
+    project_id: Optional[str] = None
 
 
 def sanitize(name: str) -> str:
@@ -114,12 +117,17 @@ def build(req: BuildReq):
     m = re.search(r"생성됨:\s*(.+)", proc.stdout)
     out_path = m.group(1).strip() if m else None
     eid = os.path.basename(out_path) if out_path else None
+    if req.project_id and eid:
+        try:
+            projects_store.set_published(req.project_id, eid)
+        except Exception:
+            pass
     return {"ok": True, "id": eid, "path": out_path, "url": ("/ebooks/%s/index.html" % eid) if eid else None, "log": proc.stdout[-1500:]}
 
 
 # ───────────────────────── HTML → 덱 변환 (html_pdf_agent 이식) ─────────────────────────
 @app.post("/api/deck")
-async def deck(file: UploadFile = File(...), theme: str = Form("light")):
+async def deck(file: UploadFile = File(...), theme: str = Form("light"), summarize: bool = Form(False)):
     """HTML 가져오기 → 편집 가능한 덱 PPTX(+PDF·썸네일). 결과 파일은 /deck_out 로 서빙."""
     try:
         from server.deck.convert import convert
@@ -127,8 +135,23 @@ async def deck(file: UploadFile = File(...), theme: str = Form("light")):
         return {"ok": False, "error": "덱 변환 모듈 로드 실패: %s" % e}
     raw = await file.read()
     html = raw.decode("utf-8", "ignore")
+    # LLM 이 연결돼 있으면 섹션을 헤드라인+핵심 몇 줄로 요약해 성근 슬라이드로(없으면 휴리스틱 압축 폴백).
+    summarize_fn = None
+    if summarize and load_llm_settings().get("configured"):
+        def summarize_fn(title: str, text: str):
+            try:
+                content = _llm_chat([
+                    {"role": "system", "content": _SUMM_SYS},
+                    {"role": "user", "content": "[제목] %s\n[내용]\n%s\n\n위 섹션을 슬라이드 1장으로 요약해 JSON으로만 답하라." % (
+                        title, (text or "")[:4000])},
+                ], max_tokens=400, temperature=0.2)
+                obj = _extract_json(content) or {}
+                bl = [str(b).strip() for b in (obj.get("bullets") or []) if str(b).strip()][:4]
+                return {"headline": str(obj.get("headline") or "")[:40], "bullets": bl} if bl else None
+            except Exception:
+                return None
     try:
-        res = convert(html, theme, file.filename or "deck.html")
+        res = convert(html, theme, file.filename or "deck.html", summarize_fn=summarize_fn)
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "error": str(e)}
     tok = res["token"]
@@ -140,6 +163,46 @@ async def deck(file: UploadFile = File(...), theme: str = Form("light")):
         "thumbs": ["/deck_out/%s/%s" % (tok, t) for t in res["thumbs"]],
         "ir": res.get("ir"),   # 편집 요소 재현(구글 슬라이드식)용 덱 IR
     }
+
+
+def _deck_summarizer():
+    """LLM 설정이 있으면 섹션 요약기 반환(없으면 None). /api/deck/stream 공용."""
+    if not load_llm_settings().get("configured"):
+        return None
+
+    def summarize_fn(title: str, text: str):
+        try:
+            content = _llm_chat([
+                {"role": "system", "content": _SUMM_SYS},
+                {"role": "user", "content": "[제목] %s\n[내용]\n%s\n\n위 섹션을 슬라이드 1장으로 요약해 JSON으로만 답하라." % (
+                    title, (text or "")[:4000])},
+            ], max_tokens=400, temperature=0.2)
+            obj = _extract_json(content) or {}
+            bl = [str(b).strip() for b in (obj.get("bullets") or []) if str(b).strip()][:4]
+            return {"headline": str(obj.get("headline") or "")[:40], "bullets": bl} if bl else None
+        except Exception:
+            return None
+    return summarize_fn
+
+
+@app.post("/api/deck/stream")
+async def deck_stream(file: UploadFile = File(...), theme: str = Form("light"), summarize: bool = Form(False)):
+    """HTML → 덱 변환을 SSE 로. 추출/빌드/PDF/슬라이드별 렌더 진행을 실시간 전송(data: JSON)."""
+    raw = await file.read()
+    html = raw.decode("utf-8", "ignore")
+    name = file.filename or "deck.html"
+    summarize_fn = _deck_summarizer() if summarize else None
+
+    def gen():
+        try:
+            from server.deck.convert import convert_stream
+            for ev in convert_stream(html, theme, name, summarize_fn=summarize_fn):
+                yield ("data: " + json.dumps(ev, ensure_ascii=False) + "\n\n").encode("utf-8")
+        except Exception as e:  # noqa: BLE001
+            yield ("data: " + json.dumps({"stage": "error", "error": str(e)}) + "\n\n").encode("utf-8")
+
+    return StreamingResponse(gen(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 # ───────────────────────── 환경설정: LLM (Agentic-PM 이식) ─────────────────────────
@@ -240,7 +303,7 @@ def test_llm(payload: LlmSettingsIn):
     enabled = bool(_coalesce(inc, current, "enabled", True))
     timeout = float(_coalesce(inc, current, "timeout", 45) or 45)
     url = llm_endpoint(provider, base_url)
-    configured = bool(enabled and url and api_key and model and user_id)
+    configured = bool(url) and llm_configured(provider, base_url, api_key, model, user_id, enabled)
     result = {
         "ok": False, "configured": configured, "provider": provider, "url": url, "model": model,
         "user_id_set": bool(user_id), "api_key_set": bool(api_key),
@@ -283,6 +346,30 @@ class ChatIn(BaseModel):
 @app.post("/api/chat/v2")
 def chat_v2(req: ChatIn):
     return chat_engine.respond(req.message, req.session_id, req.confirm, req.confirm_action_id, req.book_state)
+
+
+class ResetIn(BaseModel):
+    session_id: Optional[str] = None
+
+
+@app.post("/api/chat/reset")
+def chat_reset(req: ResetIn):
+    return chat_engine.reset_session(req.session_id)
+
+
+@app.get("/api/chat/conversations")
+def chat_conversations():
+    return {"conversations": chat_engine.list_conversations()}
+
+
+@app.get("/api/chat/conversations/{cid}")
+def chat_conversation(cid: str):
+    return chat_engine.get_conversation(cid)
+
+
+@app.delete("/api/chat/conversations/{cid}")
+def chat_conversation_delete(cid: str):
+    return chat_engine.delete_conversation(cid)
 
 
 @app.post("/api/chat/v2/stream")
@@ -439,6 +526,161 @@ def plan(req: PlanIn):
             return None
 
     return planner.make_plan(req.brief, llm_fn, req.book_state, retries=req.retries)
+
+
+# ───────────────────────── (G5) 편집 명령 → 부분 수정 계획(edits/adds) ─────────────────────────
+class EditIn(BaseModel):
+    message: str = ""
+    book_state: Optional[dict] = None
+    retries: int = 2
+
+
+@app.post("/api/edit")
+def edit(req: EditIn):
+    """편집 명령(이 장 다듬어/톤 통일/N장 추가) → 검증된 편집 계획. detect_edit 로 op 판정 후 make_edits.
+    적용(스토어 반영)은 프론트 브리지(apply_page_edits)에서. 여기서는 계획만 만든다."""
+    from server.intent import editor
+
+    op = editor.detect_edit(req.message, req.book_state)
+    if not op:
+        return {"ok": False, "reason": "edit_not_detected", "op": None,
+                "edits": [], "adds": [], "warnings": [], "summary": "편집 명령으로 인식하지 못했어요."}
+
+    def llm_fn(msgs: list) -> Optional[str]:
+        try:
+            return _llm_chat(msgs, max_tokens=1500, temperature=0.3)
+        except Exception:
+            return None
+
+    return editor.make_edits(op, req.message, llm_fn, req.book_state, retries=req.retries)
+
+
+
+# ───────────────────────── 프로젝트(내 이북) ─────────────────────────
+class ProjectCreateIn(BaseModel):
+    name: Optional[str] = None
+    state: Optional[dict] = None
+
+
+class ProjectSaveIn(BaseModel):
+    state: dict
+    name: Optional[str] = None
+
+
+class ProjectRenameIn(BaseModel):
+    name: str
+
+
+class VersionSaveIn(BaseModel):
+    state: dict
+    label: Optional[str] = None
+    pinned: bool = False
+    auto: bool = True
+
+
+class VersionPatchIn(BaseModel):
+    label: Optional[str] = None
+    pinned: Optional[bool] = None
+
+
+@app.get("/api/projects")
+def projects_list():
+    return {"projects": projects_store.list_projects()}
+
+
+@app.post("/api/projects")
+def projects_create(req: ProjectCreateIn):
+    return projects_store.create_project(req.name, req.state)
+
+
+@app.get("/api/projects/{pid}")
+def projects_get(pid: str):
+    p = projects_store.get_project(pid)
+    if not p:
+        return Response(status_code=404, content="not found")
+    return p
+
+
+@app.put("/api/projects/{pid}")
+def projects_save(pid: str, req: ProjectSaveIn):
+    return projects_store.save_project(pid, req.state, req.name)
+
+
+@app.patch("/api/projects/{pid}")
+def projects_rename(pid: str, req: ProjectRenameIn):
+    return projects_store.rename_project(pid, req.name)
+
+
+@app.delete("/api/projects/{pid}")
+def projects_delete(pid: str):
+    return projects_store.delete_project(pid)
+
+
+@app.post("/api/projects/{pid}/duplicate")
+def projects_duplicate(pid: str):
+    d = projects_store.duplicate_project(pid)
+    if not d:
+        return Response(status_code=404, content="not found")
+    return d
+
+
+class NoteIn(BaseModel):
+    project_id: str
+    id: str
+    title: str = ""
+    blocks: list = []
+    pinned: bool = False
+    sort: float = 0
+
+
+@app.get("/api/notes")
+def notes_list(project_id: str):
+    return {"notes": notes_store.list_notes(project_id)}
+
+
+@app.post("/api/notes")
+def notes_upsert(req: NoteIn):
+    return notes_store.upsert_note(req.project_id, req.id, req.title, req.blocks, req.pinned, req.sort)
+
+
+@app.delete("/api/notes/{nid}")
+def notes_delete(nid: str):
+    return notes_store.delete_note(nid)
+
+
+@app.get("/api/projects/{pid}/versions")
+def project_versions(pid: str):
+    return {"versions": projects_store.list_versions(pid)}
+
+
+@app.post("/api/projects/{pid}/versions")
+def project_version_save(pid: str, req: VersionSaveIn):
+    v = projects_store.save_version(pid, req.state, req.label, req.pinned, req.auto)
+    return {"ok": True, "version": v}
+
+
+@app.get("/api/projects/{pid}/versions/{vid}")
+def project_version_get(pid: str, vid: str):
+    v = projects_store.get_version(vid)
+    if not v:
+        return Response(status_code=404, content="not found")
+    return v
+
+
+@app.patch("/api/projects/{pid}/versions/{vid}")
+def project_version_patch(pid: str, vid: str, req: VersionPatchIn):
+    patch = {}
+    if req.label is not None:
+        patch["label"] = req.label
+    if req.pinned is not None:
+        patch["pinned"] = req.pinned
+    return projects_store.update_version(vid, patch)
+
+
+@app.delete("/api/projects/{pid}/versions/{vid}")
+def project_version_delete(pid: str, vid: str):
+    return projects_store.delete_version(vid)
+
 
 
 if EBOOKS.exists():

@@ -1,19 +1,23 @@
 import { useState, useRef, useEffect } from 'react'
 import { useBuilder } from '../../state/store'
+import { useProjects } from '../../persistence/projects'
 import { useCanvasUI } from '../../state/canvasUI'
+import { useAutosave } from '../../persistence/autosave'
 import type { Tool } from '../../state/canvasUI'
 
 interface MItem { label?: string; sc?: string; run?: () => void; disabled?: boolean; sep?: boolean }
 interface Menu { label: string; hwp?: boolean; items: MItem[] }
 
 // 구글 슬라이드식 드롭다운 메뉴. 실동작 가능한 항목은 연결, 미구현은 비활성 표시.
-export default function MenuBar({ onHelp, onSettings, onImport, onPresent }: { onHelp: () => void; onSettings: () => void; onImport: () => void; onPresent: () => void }) {
+export default function MenuBar({ onHelp, onTutorial, onSettings, onImport, onPresent }: { onHelp: () => void; onTutorial: () => void; onSettings: () => void; onImport: () => void; onPresent: () => void }) {
   const addCard = useBuilder((s) => s.addCard)
+  const backToLibrary = useProjects((s) => s.backToLibrary)
   const setPageBg = useBuilder((s) => s.setPageBg)
   const removePage = useBuilder((s) => s.removePage)
   const duplicatePage = useBuilder((s) => s.duplicatePage)
   const selId = useBuilder((s) => s.selectedPageId)
   const setTool = useCanvasUI((s) => s.setTool)
+  const saveNow = useAutosave((s) => s.saveNow)
   const [open, setOpen] = useState<number | null>(null)
   const wrap = useRef<HTMLDivElement>(null)
 
@@ -29,8 +33,15 @@ export default function MenuBar({ onHelp, onSettings, onImport, onPresent }: { o
 
   const MENUS: Menu[] = [
     { label: '파일', items: [
-      { label: '📄 HTML 가져오기', run: onImport },
-      { label: '↧ 이북(PDF) 만들기', run: () => emit('ebook:build') },
+      { label: '📄 HTML 가져오기', sc: 'Alt+O', run: onImport },
+      { sep: true },
+      { label: '💾 저장', sc: '⌘S', run: () => { void saveNow() } },
+      { sep: true },
+      { label: '🖼 PDF로 내보내기 (이미지)', run: () => emit('ebook:export-pdf') },
+      { label: '📊 PPT로 내보내기 (편집 가능)', run: () => emit('ebook:export-pptx') },
+      { label: '↧ 이북(웹) 만들기', sc: '⌘↵', run: () => emit('ebook:build') },
+      { sep: true },
+      { label: '▷ 슬라이드쇼 (미리 보기)', run: onPresent },
       { sep: true },
       { label: '⚙ 환경설정', run: onSettings },
     ] },
@@ -42,61 +53,60 @@ export default function MenuBar({ onHelp, onSettings, onImport, onPresent }: { o
       { label: '선택 요소 삭제', sc: 'Del', run: () => emit('ebook:del') },
     ] },
     { label: '보기', items: [
-      { label: '▷ 슬라이드쇼', run: onPresent },
+      { label: '▶ 예시영상', run: () => emit('ebook:demo') },
       { label: '도움말', run: onHelp },
     ] },
     { label: '삽입', items: [
       { label: 'T  텍스트 상자', run: () => tool('text') },
-      { label: '🖼  이미지', run: () => tool('image') },
+      { label: '🖼  이미지', run: () => emit('ebook:insert-image') },
       { label: '◇  도형', run: () => tool('box') },
       { label: '▦  표', run: () => tool('table') },
       { label: '╱  선', run: () => tool('pen') },
       { label: '🅰  Word Art (글맵시)', run: () => tool('wordart') },
       { sep: true },
       { label: '＋ 새 슬라이드', sc: '⌘M', run: () => addCard('slide') },
+      { label: '＋ 덱 섹션 카드', run: () => addCard('dsection') },
     ] },
     { label: '서식', items: [
       { label: '굵게 (선택 요소)', run: () => emit('ebook:fmt-bold') },
       { label: '글자색 (선택 요소)', run: () => emit('ebook:fmt-color') },
       { sep: true },
-      { label: '정렬 및 들여쓰기', disabled: true },
-      { label: '글머리기호', disabled: true },
-      { label: '서식 지우기', disabled: true },
+      { label: '정렬 및 들여쓰기', run: () => emit('ebook:align-cycle') },
+      { label: '글머리기호', run: () => emit('ebook:bullet') },
+      { label: '서식 지우기', run: () => emit('ebook:fmt-clear') },
     ] },
     { label: '슬라이드', items: [
+      { label: '▷ 슬라이드쇼', run: onPresent },
+      { sep: true },
       { label: '＋ 새 슬라이드', sc: '⌘M', run: () => addCard('slide') },
+      { label: '＋ 덱 섹션 카드', run: () => addCard('dsection') },
       { label: '⧉ 슬라이드 복제', run: () => { if (selId != null) duplicatePage(selId) } },
       { label: '🗑 슬라이드 삭제', run: () => { if (selId != null) removePage(selId) } },
       { sep: true },
       { label: '◻ 배경 — 라이트', run: () => curBg(false) },
       { label: '◼ 배경 — 다크', run: () => curBg(true) },
-      { label: '테마 변경', disabled: true },
+      { label: '테마 변경(라이트/다크)', run: () => emit('ebook:bg-toggle') },
     ] },
     { label: '정렬', items: [
       { label: '맨 앞으로', run: () => emit('ebook:z-front') },
       { label: '맨 뒤로', run: () => emit('ebook:z-back') },
       { sep: true },
-      { label: '페이지 중앙 배치', disabled: true },
-      { label: '회전', disabled: true },
+      { label: '페이지 중앙 배치', run: () => emit('ebook:el-center') },
+      { label: '회전 (+15°)', run: () => emit('ebook:el-rotate') },
     ] },
     { label: '도구', items: [
       { label: '⚙ 환경설정', run: onSettings },
-      { label: '맞춤법 검사', disabled: true },
+      { label: '맞춤법 검사 켜기/끄기', run: () => { const c = useCanvasUI.getState(); c.setSpell(!c.spell) } },
     ] },
-    { label: '한글(HWP)', hwp: true, items: [
-      { label: '글자모양 (굵게/색)', run: () => emit('ebook:fmt-bold') },
-      { label: '문단모양', disabled: true },
-      { label: '▦ 표', run: () => tool('table') },
-      { label: '🅰 글맵시', run: () => tool('wordart') },
-      { label: '각주', disabled: true },
-      { label: '맞춤법', disabled: true },
+    { label: '도움말', items: [
+      { label: '도움말 열기', run: onHelp },
+      { label: '▶ 튜토리얼 (30초 시연)', run: onTutorial },
     ] },
-    { label: '확장', items: [{ label: '준비 중', disabled: true }] },
-    { label: '도움말', items: [{ label: '도움말 열기', run: onHelp }] },
   ]
 
   return (
     <div className="ax-menu" ref={wrap}>
+      <button className="ax-lib" title="내 이북(라이브러리로 돌아가기)" onClick={() => void backToLibrary()}>☰ 내 이북</button>
       {MENUS.map((m, i) => (
         <div key={m.label} className="ax-mwrap">
           <button

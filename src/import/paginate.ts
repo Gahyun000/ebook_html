@@ -80,7 +80,7 @@ export function paginate(doc: ImportedDoc, orientation: Orientation, size: SizeP
           if (!fits(title, s.blocks.slice(start, i + 1)) && i > start) break // 넘치면 직전까지
           i++
         }
-        out.push({ title, blocks: s.blocks.slice(start, i) })
+        out.push({ title, blocks: s.blocks.slice(start, i), contd: part > 0 })
         part++
       }
     }

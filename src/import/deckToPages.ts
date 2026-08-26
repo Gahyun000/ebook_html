@@ -1,21 +1,30 @@
 // 덱 IR → 편집 가능한 페이지(자유 요소). "구글 슬라이드처럼 덱 그대로 + 수정 가능".
 // deck_builder(7.5×10 inch) 레이아웃을 ebook_html 세로 캔버스 좌표로 재현한다.
+// 팔레트는 deck_builder.js(EVER-PEAK)와 동기화 — 미리보기 덱과 편집 캔버스가 같은 룩이 되도록.
 import type { Page, FreeEl, Orientation } from '../state/store'
 import { pageSize } from '../cards/sizing'
 
 interface Card { type?: string; kick?: string; title?: string; desc?: string; num?: string; dot?: string; badge?: string; id?: string; role?: string; icon?: string; value?: string; label?: string; color?: string }
-interface DeckPage { type: string; markN?: string; markEn?: string; heading?: string; headingSize?: number; sub?: string; eyebrow?: string; cols?: string; cards?: Card[]; small?: boolean; note?: string; cardsY?: number; cardsH?: number; eyebrowY?: number; titleH?: number; subH?: number; title?: string; items?: string[][]; lines?: { text: string }[] }
+interface DeckTable { rows: string[][]; cells?: number }
+interface OverlayRun { t: string; color?: string; bold?: boolean; br?: boolean }
+interface OverlayBox { x: number; y: number; w: number; h: number; size: number; align?: string; runs: OverlayRun[] }
+interface DeckTocItem { sectionId: string; markN?: string; title: string; summary?: string; pageNo: string }
+interface DeckPage { type: string; role?: 'cover' | 'toc' | 'content' | 'back'; sectionId?: string; pageNo?: string; tocItems?: DeckTocItem[]; markN?: string; markEn?: string; heading?: string; headingSize?: number; sub?: string; eyebrow?: string; cols?: string; cards?: Card[]; small?: boolean; note?: string; cardsY?: number; cardsH?: number; eyebrowY?: number; titleH?: number; subH?: number; title?: string; items?: string[][]; lines?: { text: string }[]; table?: DeckTable; mode?: string; dense?: number; bgImage?: string; overlay?: OverlayBox[] }
 interface DeckIR { meta: { title?: string; footerLeft?: string; theme?: string; brandTop?: string; brandTopRight?: string; wordmark?: { a: string; b: string; sub: string } }; pages: DeckPage[] }
 
-const LIGHT = { pageBg: '', ink: '#111318', ink2: '#4f4e4b', muted: '#8a8883', blue: '#2a78d6', blueD: '#184f95', violet: '#4a3aa7', aqua: '#128a62', orange: '#c5501f', cardBg: '#f5f6f8', badgeBg: '#eaf2fd' }
-const DARK = { pageBg: '#0e1c30', ink: '#ffffff', ink2: '#c9d6e6', muted: '#8ea3bd', blue: '#7db4ff', blueD: '#9fc0ff', violet: '#b7a6ff', aqua: '#5fd1a6', orange: '#f0996a', cardBg: '#16273f', badgeBg: '#1b3050' }
+// 본문 팔레트 (EVER-PEAK 라이트/다크) — deck_builder.js 와 동일 값.
+const LIGHT = { pageBg: '', ink: '#0F1B3D', ink2: '#1C2433', muted: '#8A92A3', blue: '#2462EB', blueD: '#1B4FC4', violet: '#5B4BD6', aqua: '#3E9E6E', orange: '#D98A2A', cardBg: '#F6F8FC', badgeBg: '#EAF1FE' }
+const DARK = { pageBg: '#0b1626', ink: '#ffffff', ink2: '#e7edf6', muted: '#9fb0c7', blue: '#4d86ff', blueD: '#6e9bff', violet: '#a796ff', aqua: '#4fc08d', orange: '#e9a05c', cardBg: '#141f30', badgeBg: '#182740' }
+// 표지 팔레트 (네이비 배경) — 라이트/다크 모두 표지는 네이비. deck_builder.js 의 cover 서브팔레트와 동일.
+const COVER_L = { pageBg: '#0F1B3D', ink: '#ffffff', ink2: '#BAC4DC', muted: '#8B97BC', blue: '#6EA0FF', blueD: '#6EA0FF', violet: '#6EA0FF', aqua: '#57C9A0', orange: '#F0A968', cardBg: '#18264A', badgeBg: '#18264A' }
+const COVER_D = { pageBg: '#0b1626', ink: '#ffffff', ink2: '#9FB0C7', muted: '#68798F', blue: '#4d86ff', blueD: '#6e9bff', violet: '#a796ff', aqua: '#4fc08d', orange: '#e9a05c', cardBg: '#141f30', badgeBg: '#141f30' }
 const DOT = (t: typeof LIGHT, k?: string) => k === 'aqua' ? t.aqua : k === 'orange' ? t.orange : t.blue
 
 export function deckIrToPages(ir: DeckIR, orientation: Orientation = 'portrait'): Page[] {
   const { W, H } = pageSize(orientation)
   const Sx = W / 7.5, Sy = H / 10
   const dark = ir.meta?.theme === 'dark'
-  const T = dark ? DARK : LIGHT
+  const BASE = dark ? DARK : LIGHT
   const MX = 0.62, CW = 6.26
   const total = ir.pages.length
   let eid = 1
@@ -23,16 +32,30 @@ export function deckIrToPages(ir: DeckIR, orientation: Orientation = 'portrait')
 
   const pages: Page[] = ir.pages.map((pg, idx) => {
     const els: FreeEl[] = []
-    const txt = (xi: number, yi: number, wi: number, hi: number, text: string, pt: number, o: { bold?: boolean; color?: string } = {}) =>
-      els.push({ id: eid++, type: 'text', x: xi * Sx, y: yi * Sy, w: wi * Sx, h: hi * Sy, text: (text || '').replace(/\n/g, ' '), color: 'transparent', fs: fs(pt), bold: !!o.bold, tcolor: o.color || T.ink })
+    // 표지는 네이비 서브팔레트, 나머지는 본문 팔레트 — deck_builder.js 와 동일한 분기.
+    const isCover = pg.type === 'cover'
+    const T = isCover ? (dark ? COVER_D : COVER_L) : BASE
+    const txt = (xi: number, yi: number, wi: number, hi: number, text: string, pt: number, o: { bold?: boolean; color?: string; gotoSeq?: number } = {}) =>
+      els.push({ id: eid++, type: 'text', x: xi * Sx, y: yi * Sy, w: wi * Sx, h: hi * Sy, text: (text || '').replace(/\n/g, ' '), color: 'transparent', fs: fs(pt), bold: !!o.bold, tcolor: o.color || T.ink, gotoSeq: o.gotoSeq })
     const box = (xi: number, yi: number, wi: number, hi: number, color: string) =>
       els.push({ id: eid++, type: 'round', x: xi * Sx, y: yi * Sy, w: wi * Sx, h: hi * Sy, text: '', color, fs: 12 })
+    // 표 → 편집 가능한 네이티브 표 요소(FreeLayer 가 셀 그리드로 렌더). 카드요약이 아니라 무손실.
+    const tableEl = (rows: string[][], yi: number) => {
+      const nr = rows.length, nc = Math.max(...rows.map((r) => r.length))
+      const cells = rows.map((r) => { const rr = r.slice(0, nc); while (rr.length < nc) rr.push(''); return rr })
+      const pt = nr <= 6 ? 9 : nr <= 9 ? 8 : nr <= 12 ? 7 : 6
+      const hh = Math.max(1.0, 9.15 - yi)
+      els.push({ id: eid++, type: 'table', x: MX * Sx, y: yi * Sy, w: CW * Sx, h: hh * Sy, text: '', color: 'transparent', fs: fs(pt), rows: nr, cols: nc, cells })
+    }
 
-    // 공통: 상단 메타 + 하단 꼬리
-    txt(MX, 0.42, CW * 0.55, 0.3, ir.meta?.brandTop || 'UNIEVER CO., LTD.', 9, { color: T.muted })
-    txt(MX + CW * 0.4, 0.42, CW * 0.6, 0.3, ir.meta?.brandTopRight || 'AX TRANSFORMATION · 2026', 9, { bold: true, color: T.blue })
-    txt(MX, 9.42, CW * 0.6, 0.3, ir.meta?.footerLeft || '', 9, { color: T.muted })
-    txt(MX + CW * 0.4, 9.42, CW * 0.6, 0.3, ('0' + (idx + 1)).slice(-2) + ' / ' + total, 9, { color: T.muted })
+    // 공통: 상단 메타 + 하단 꼬리 (픽셀 페이지에선 이미지 위에 다시 얹어 브랜드 레일 유지)
+    const drawChrome = () => {
+      txt(MX, 0.42, CW * 0.55, 0.3, ir.meta?.brandTop || 'UNIEVER CO., LTD.', 9, { color: T.muted })
+      txt(MX + CW * 0.4, 0.42, CW * 0.6, 0.3, ir.meta?.brandTopRight || 'AX TRANSFORMATION · 2026', 9, { bold: true, color: T.blue })
+      txt(MX, 9.42, CW * 0.6, 0.3, ir.meta?.footerLeft || '', 9, { color: T.muted })
+      txt(MX + CW * 0.4, 9.42, CW * 0.6, 0.3, ('0' + (idx + 1)).slice(-2) + ' / ' + total, 9, { color: T.muted })
+    }
+    drawChrome()
 
     const drawCards = (cards: Card[], colN: number, cy: number, ch0: number, small: boolean) => {
       const gap = 0.16, n = cards.length, rows = Math.ceil(n / colN)
@@ -70,10 +93,11 @@ export function deckIrToPages(ir: DeckIR, orientation: Orientation = 'portrait')
       txt(MX, 1.5, CW, 0.9, pg.title || '목차', 34, { bold: true, color: T.ink })
       if (pg.sub) txt(MX, 2.5, CW, 0.5, pg.sub, 12, { color: T.ink2 })
       let y = 3.05; const rh = Math.min(0.66, (8.9 - 3.05) / Math.max(1, (pg.items || []).length))
-      ;(pg.items || []).forEach((r) => {
+      ;(pg.items || []).forEach((r, itemIdx) => {
+        const gotoSeq = itemIdx + 1
         txt(MX, y, 0.6, rh, r[0], 13, { bold: true, color: T.blue })
-        txt(MX + 0.65, y, 2.8, rh, r[1] || '', 13, { bold: true, color: T.ink })
-        txt(MX + 3.5, y, CW - 4.1, rh, r[2] || '', 10, { color: T.muted })
+        txt(MX + 0.65, y, 2.8, rh, r[1] || '', 13, { bold: true, color: T.ink, gotoSeq })
+        txt(MX + 3.5, y, CW - 4.1, rh, r[2] || '', 10, { color: T.muted, gotoSeq })
         txt(MX + CW - 0.6, y, 0.6, rh, r[3] || '', 10, { color: T.muted })
         y += rh
       })
@@ -88,19 +112,53 @@ export function deckIrToPages(ir: DeckIR, orientation: Orientation = 'portrait')
       if (pg.sub) txt(MX, 2.7, CW * 0.9, 0.9, pg.sub, 13, { color: T.ink2 })
       if (pg.eyebrow) txt(MX, 6.0, CW, 0.3, pg.eyebrow, 9, { color: T.muted })
       drawCards((pg.cards || []).map((c) => ({ ...c, type: 'stat' })), Math.max(1, (pg.cards || []).length), 6.4, 2.35, false)
+    } else if (pg.bgImage) {
+      // 픽셀 페이지: 글자없는 섹션 스크린샷을 배경 이미지로 깔고, 그 위에 편집 텍스트 오버레이.
+      // 캔버스 미리보기 = 내보낸 PPTX 픽셀 일치. 이미지 위에 브랜드 레일만 다시 얹는다.
+      els.push({ id: eid++, type: 'image', x: 0, y: 0, w: W, h: H, text: '', color: 'transparent', fs: 12, src: pg.bgImage })
+      ;(pg.overlay || []).forEach((b) => {
+        const text = b.runs.map((r) => r.t).join('')
+        if (!text.trim()) return
+        const cr = b.runs.find((r) => r.color)
+        const al: 'left' | 'center' | 'right' = b.align === 'center' ? 'center' : (b.align === 'right' || b.align === 'end') ? 'right' : 'left'
+        els.push({ id: eid++, type: 'text', x: b.x * Sx, y: b.y * Sy, w: b.w * Sx, h: b.h * Sy, text, color: 'transparent', fs: fs(b.size), bold: b.runs.some((r) => r.bold), tcolor: cr ? '#' + cr.color : T.ink, align: al })
+      })
+      drawChrome()
     } else { // section (기본)
       if (pg.markN || pg.markEn) txt(MX, 1.05, CW, 0.3, ((pg.markN || '') + '   ' + (pg.markEn || '')).trim(), 11, { bold: true, color: T.blue })
-      const th = pg.titleH || 1.0
+      const longTitle = (pg.heading || '').length > 18
+      const th = pg.titleH || (longTitle ? 1.5 : 1.0)
       txt(MX, 1.47, CW, th, pg.heading || '', 27, { bold: true, color: T.ink })
       if (pg.sub) txt(MX, 1.47 + th + 0.1, CW * 0.9, pg.subH || 1.0, pg.sub, 13, { color: T.ink2 })
-      const cy = pg.cardsY || 6.35, ch0 = pg.cardsH || 2.35
-      if (pg.eyebrow) txt(MX, pg.eyebrowY || (cy - 0.4), CW, 0.3, pg.eyebrow, 9, { color: T.muted })
-      const colN = pg.cols ? Number(pg.cols.replace(/\D/g, '')) || 3 : 3
-      drawCards(pg.cards || [], colN, cy, ch0, !!pg.small)
-      if (pg.note) { box(MX, 8.45, CW, 0.72, T.badgeBg); txt(MX + 0.22, 8.45, CW - 0.44, 0.72, pg.note, 10, { color: T.blueD }) }
+      if (pg.table && pg.table.rows && pg.table.rows.length) {
+        // page.table 이 있으면(백엔드 extractor 가 표 보존) 표를 그대로 렌더 → 캔버스=내보내기 일치.
+        const subEnd = 1.47 + th + (pg.sub ? 0.1 + (pg.subH || 0.6) : 0.15)
+        tableEl(pg.table.rows, Math.max(3.0, subEnd + 0.15))
+      } else {
+        const cy = pg.cardsY || 6.35, ch0 = pg.cardsH || 2.35
+        if (pg.eyebrow) txt(MX, pg.eyebrowY || (cy - 0.4), CW, 0.3, pg.eyebrow, 9, { color: T.muted })
+        const colN = pg.cols ? Number(pg.cols.replace(/\D/g, '')) || 3 : 3
+        drawCards(pg.cards || [], colN, cy, ch0, !!pg.small)
+        if (pg.note) { box(MX, 8.45, CW, 0.72, T.badgeBg); txt(MX + 0.22, 8.45, CW - 0.44, 0.72, pg.note, 10, { color: T.blueD }) }
+      }
     }
 
-    return { id: 0, cardKey: 'slide', fields: {}, free: true, els, conns: [], strokes: [], blocks: [], bg: dark ? '#0e1c30' : '' }
+    return {
+      id: 0,
+      cardKey: 'slide',
+      fields: { title: pg.heading || pg.title || '', sectionId: pg.sectionId || '', pageNo: pg.pageNo || '' },
+      free: true,
+      els,
+      conns: [],
+      strokes: [],
+      blocks: [],
+      bg: isCover ? T.pageBg : (dark ? DARK.pageBg : ''),
+      contd: false,
+      role: pg.role || (pg.type === 'cover' ? 'cover' : pg.type === 'toc' ? 'toc' : 'content'),
+      sectionId: pg.sectionId,
+      pageNo: pg.pageNo,
+      tocItems: pg.tocItems,
+    }
   })
 
   return pages

@@ -27,6 +27,20 @@ def extract(question: str) -> dict[str, Any]:
             slots["shape"] = tool
             break
 
+    # 개수: '3개' 또는 한글 수사('세 개'). 도형 배치 개수로 쓴다.
+    _KNUM = {"한": 1, "하나": 1, "두": 2, "둘": 2, "세": 3, "셋": 3, "네": 4, "넷": 4,
+             "다섯": 5, "여섯": 6, "일곱": 7, "여덟": 8, "아홉": 9, "열": 10}
+    mnum = re.search(r"(\d+)\s*개", q)
+    if mnum:
+        slots["count"] = int(mnum.group(1))
+    else:
+        mk = re.search(r"(한|하나|두|둘|세|셋|네|넷|다섯|여섯|일곱|여덟|아홉|열)\s*개", q)
+        if mk:
+            slots["count"] = _KNUM[mk.group(1)]
+
+    if re.search(r"(모두|전부|전체|싹|모든)", q) or re.search(r"다\s*(지워|없애|삭제|치워|제거)", q):
+        slots["delete_all"] = True
+
     if re.search(r"(다크|어둡|어두운)", q):
         slots["theme"] = "dark"
     elif re.search(r"(라이트|밝게|밝은)", q):

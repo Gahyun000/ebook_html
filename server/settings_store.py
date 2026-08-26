@@ -67,6 +67,12 @@ def _coerce_float(value: Any, default: float) -> float:
         return default
 
 
+def llm_configured(provider: str, base_url: str, api_key: str, model: str, user_id: str = "", enabled: bool = True) -> bool:
+    if not enabled or not base_url or not api_key or not model:
+        return False
+    return bool(user_id) if (provider or "self").lower() == "self" else True
+
+
 def _read_raw(conn: sqlite3.Connection) -> dict[str, str]:
     raw: dict[str, str] = {}
     try:
@@ -108,7 +114,7 @@ def load_llm_settings(conn: Optional[sqlite3.Connection] = None) -> dict:
     model = (resolved["model"] or _DEFAULTS["model"]).strip()
     enabled = _coerce_bool(resolved["enabled"], _DEFAULTS["enabled"])
     timeout = _coerce_float(resolved["timeout"], _DEFAULTS["timeout"])
-    configured = bool(enabled and base_url and user_id and api_key and model)
+    configured = llm_configured(provider, base_url, api_key, model, user_id, enabled)
 
     return {
         "provider": provider, "base_url": base_url, "user_id": user_id, "api_key": api_key,

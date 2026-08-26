@@ -24,7 +24,7 @@ pip install -q --upgrade pip
 pip install -q fastapi "uvicorn[standard]" pillow python-docx beautifulsoup4 pymupdf python-multipart
 
 # 2.5) EVER-FOLIO (uniever_ebook 이북 라이브러리) 같이 기동 — 8811
-#      형제 앱. EVER-FRAME 상단바의 'EVER-FOLIO' 칩이 http://127.0.0.1:8811 로 연결된다.
+#      형제 앱. EVER-SKETCH 상단바의 'EVER-FOLIO' 칩이 http://127.0.0.1:8811 로 연결된다.
 FOLIO_PORT=8811
 FOLIO_DIR="$(cd ../uniever_ebook/ebook-generator 2>/dev/null && pwd || true)"
 if [ -n "$FOLIO_DIR" ] && [ -f "$FOLIO_DIR/serve.py" ]; then

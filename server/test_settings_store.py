@@ -23,6 +23,18 @@ ok("저장 후 configured=True", saved["configured"] is True)
 ok("저장 후 model 반영", saved["model"] == "gemma3:27b")
 ok("timeout 코어스(30.0)", abs(saved["timeout"] - 30.0) < 1e-6)
 
+openai_ok = ss.save_llm_settings({
+    "provider": "openai", "base_url": "https://api.openai.com/v1", "user_id": "",
+    "api_key": "sk-abc123456789", "model": "gpt-test", "enabled": True, "timeout": 30,
+}, updated_by="test")
+ok("openai provider 는 user_id 없이 configured=True", openai_ok["configured"] is True)
+
+self_missing_user = ss.save_llm_settings({
+    "provider": "self", "base_url": "http://x:8004/v1", "user_id": "",
+    "api_key": "sk-abc123456789", "model": "gemma3:27b", "enabled": True, "timeout": 30,
+}, updated_by="test")
+ok("self provider 는 user_id 없으면 configured=False", self_missing_user["configured"] is False)
+
 d1 = ss.load_llm_settings()
 ok("재로딩 api_key 유지", d1["api_key"] == "sk-abc123456789")
 ok("mask_key 마스킹(원문 미노출)", "sk-abc123456789" not in ss.mask_key(d1["api_key"]) and len(ss.mask_key(d1["api_key"])) > 0)

@@ -10,6 +10,9 @@ export interface BookStatePage {
   cardKey: string
   title: string
   summary: string
+  // G5 부분 수정 레인이 '이 장 다듬기/톤 통일'에서 현재 문구를 알아야 하므로 필드 맵을 함께 보낸다.
+  // 필드형 카드(cover/kpi/summary…)만 값이 있고, note/toc/slide 는 빈 객체다.
+  fields: Record<string, string>
 }
 export interface BookState {
   title: string
@@ -47,6 +50,16 @@ function pageSummary(p: Page): string {
   return ''
 }
 
+// 편집 레인용 필드 맵: 값이 있는 짧은 텍스트 필드만(각 200자 상한). note/toc 는 빈 객체.
+function pageFields(p: Page): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [k, v] of Object.entries(p.fields || {})) {
+    const t = String(v ?? '').trim()
+    if (t) out[k] = t.length > 200 ? t.slice(0, 199) + '…' : t
+  }
+  return out
+}
+
 // 순수 변환 — 스토어 상태에서 스냅샷을 만든다(테스트 용이).
 export function buildSnapshot(
   s: Pick<BuilderState, 'title' | 'orientation' | 'theme' | 'selectedPageId' | 'pages'>,
@@ -61,6 +74,7 @@ export function buildSnapshot(
       cardKey: p.cardKey,
       title: pageTitle(p),
       summary: pageSummary(p),
+      fields: pageFields(p),
     })),
   }
 }

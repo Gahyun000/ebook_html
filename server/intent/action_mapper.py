@@ -7,10 +7,20 @@ from __future__ import annotations
 from typing import Any
 
 from server.intent.schemas import EbookAction
+from server.intent.catalog import CARD_LABEL
 
 _SHAPE_LABEL = {"box": "사각형", "round": "둥근 사각형", "ellipse": "원", "diamond": "마름모",
                 "triangle": "삼각형", "icon": "아이콘", "text": "텍스트 상자", "table": "표",
                 "image": "이미지", "wordart": "글맵시", "connect": "화살표"}
+
+def _josa_eul(word: str) -> str:
+    """목적격 조사: 받침 있으면 '을', 없으면 '를'. 한글 음절만 판정, 그 외엔 '을'."""
+    if not word:
+        return "을"
+    code = ord(word[-1])
+    if 0xAC00 <= code <= 0xD7A3:
+        return "를" if (code - 0xAC00) % 28 == 0 else "을"
+    return "을"
 
 
 def build(intent: str, slots: dict[str, Any]) -> tuple[EbookAction, str, bool]:
@@ -22,11 +32,36 @@ def build(intent: str, slots: dict[str, Any]) -> tuple[EbookAction, str, bool]:
     if intent == "delete_slide":
         return EbookAction("delete_slide"), "현재 슬라이드를 삭제했어요.", False
 
+    if intent == "delete_element":
+        tool = slots.get("shape")
+        count = slots.get("count")
+        payload: dict[str, Any] = {}
+        if slots.get("delete_all"): payload["all"] = True
+        if tool: payload["tool"] = tool
+        if count: payload["count"] = count
+        if payload.get("all"):
+            reply = "캔버스의 도형을 모두 지웠어요."
+        elif tool:
+            label = _SHAPE_LABEL.get(tool, "도형")
+            reply = f"‘{label}’ {count}개를 지웠어요." if count else f"‘{label}’ 도형을 지웠어요."
+        else:
+            reply = "선택한(또는 방금 놓은) 도형을 지웠어요."
+        return EbookAction("delete_elements", payload), reply, False
     if intent == "insert_text":
         return EbookAction("insert_element", {"tool": "text"}), "텍스트 도구를 켰어요. 캔버스를 클릭해 글상자를 놓으세요.", False
+    if intent == "insert_card":
+        ck = slots.get("card")
+        label = CARD_LABEL.get(ck, "카드")
+        return EbookAction("add_card", {"cardKey": ck, "label": label}), f"‘{label}’ 카드를 추가했어요. 오른쪽에서 내용을 채워보세요.", False
     if intent == "insert_shape":
         tool = slots.get("shape", "box")
-        return EbookAction("insert_element", {"tool": tool}), f"‘{_SHAPE_LABEL.get(tool, '도형')}’ 도구를 켰어요. 캔버스를 클릭하면 생깁니다.", False
+        label = _SHAPE_LABEL.get(tool, "도형")
+        raw = slots.get("count")
+        n = max(1, min(20, int(raw))) if raw else 1
+        # 화살표·이미지는 상호작용이 필요해 별도 분기가 처리한다. 도형은 캔버스에 바로 배치.
+        obj = f"‘{label}’ {n}개를" if n > 1 else f"‘{label}’{_josa_eul(label)}"
+        return (EbookAction("insert_element", {"tool": tool, "count": n}),
+                f"{obj} 캔버스에 놓았어요. 위치·크기는 드래그로 바꿀 수 있어요.", False)
     if intent == "insert_arrow":
         return EbookAction("insert_element", {"tool": "connect"}), "화살표 연결 도구를 켰어요. 도형 두 개를 차례로 클릭하세요.", False
     if intent == "insert_table":

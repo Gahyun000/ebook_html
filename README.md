@@ -1,4 +1,4 @@
-# ebook_html — 경영진 틀 빌더 (React + TypeScript)
+# ebook_html — 경영진 스케치 빌더 (React + TypeScript)
 
 경영진이 사업모델을 카드로 조립하고(필요 시 자유 캔버스로 자유 편집) 이북/덱으로 내보내는 도구.
 산출물(PNG 폴더)은 기존 `uniever_ebook`의 `generator.py`로 이북 빌드 — **uniever_ebook 무수정**.

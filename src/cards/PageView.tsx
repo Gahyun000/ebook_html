@@ -1,10 +1,14 @@
 import { useRef, useLayoutEffect, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 import type { Page, Orientation, SizePreset } from '../state/store'
+import { useBuilder } from '../state/store'
+import { useCanvasUI } from '../state/canvasUI'
 import { cardByKey } from './registry'
-import { colors } from '../design/tokens'
+import { colors, themeTokens } from '../design/tokens'
 import { pageSize } from './sizing'
 import type { TocItem } from '../builder/util'
+import { paperBgStyle } from './paper'
+import { pushSnap } from '../canvas/model'
 
 export interface PageViewProps {
   page: Page
@@ -13,6 +17,7 @@ export interface PageViewProps {
   size: SizePreset
   font: string
   tocItems?: TocItem[]
+  editable?: boolean   // 캔버스(편집 화면)에서 카드 텍스트를 그 자리에서 인라인 편집
 }
 
 function groupColor(group?: string): string {
@@ -22,6 +27,14 @@ function groupColor(group?: string): string {
 }
 function esc(s: string): string {
   return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+// 칸에 포커스되면 그 안 글자를 전체 선택(클릭=전체선택). 드래그로 일부만 긁었으면 그대로 둠.
+function selectAllOnFocus(e: React.FocusEvent<HTMLElement>) {
+  const node = e.currentTarget
+  requestAnimationFrame(() => {
+    const sel = window.getSelection()
+    if (sel && sel.isCollapsed) { const r = document.createRange(); r.selectNodeContents(node); sel.removeAllRanges(); sel.addRange(r) }
+  })
 }
 function mindmapSVG(fields: Record<string, string>, land: boolean, sc: number): string {
   const center = fields.center || '중심'
@@ -58,12 +71,94 @@ function FitBox({ children, maxH }: { children: ReactNode; maxH: number }) {
   )
 }
 
-export default function PageView({ page, docTitle, orientation, size, font, tocItems = [] }: PageViewProps) {
+
+// 인라인 편집 필드들 — PageView 함수 "밖"에 둔다.
+// 안에 두면 렌더마다 새 컴포넌트 타입이 만들어져 React 가 이 서브트리를 언마운트/재마운트한다.
+// 그러면 옆 칸을 클릭하는 순간 그 DOM 노드가 파괴되어 커서가 빠지고, 한글 IME 조합도 깨진다.
+// (NoteBlocks.tsx 가 같은 이유로 이미 피하고 있는 패턴)
+interface EfCtx {
+  f: Record<string, string>
+  page: Page
+  editable: boolean
+  updateField: (pageId: number, key: string, value: string) => void
+  selectAllOnFocus: (e: React.FocusEvent<HTMLElement>) => void
+  startDetachDrag: (e: React.PointerEvent<HTMLElement>, boxEl: HTMLElement, styleEl: HTMLElement, k: string, text: string) => void
+  startDetachBox: (e: React.PointerEvent<HTMLElement>, boxEl: HTMLElement, k: string) => void
+}
+
+function Ef({ ctx, k, ph, style }: { ctx: EfCtx; k: string; ph?: string; style?: CSSProperties }): ReactNode {
+  const v = ctx.f[k] || ''
+  if (ctx.page.detached && ctx.page.detached.includes(k)) return <span style={{ ...style, visibility: 'hidden' }}>{v}</span>
+  if (!ctx.editable) return <>{v || ph || ''}</>
+  return (
+    <span className="cardedit" data-ph={ph || '내용 입력'} style={style}
+      contentEditable suppressContentEditableWarning
+      onFocus={ctx.selectAllOnFocus}
+      onPointerDown={(e) => { e.stopPropagation(); ctx.startDetachDrag(e, e.currentTarget, e.currentTarget, k, e.currentTarget.textContent || '') }}
+      onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); (e.currentTarget as HTMLElement).blur() } }}
+      onBlur={(e) => { const t = e.currentTarget.textContent || ''; if (t !== (ctx.f[k] || '')) ctx.updateField(ctx.page.id, k, t) }}
+    >{v}</span>
+  )
+}
+
+function EfBox({ ctx, k, boxStyle, children }: { ctx: EfCtx; k: string; boxStyle?: CSSProperties; children: ReactNode }): ReactNode {
+  const hidden = !!(ctx.page.detached && ctx.page.detached.includes(k))
+  if (!ctx.editable) return <div style={boxStyle}>{children}</div>
+  return (
+    <div style={hidden ? { ...boxStyle, visibility: 'hidden' } : boxStyle}
+      onPointerDown={hidden ? undefined : (e) => { e.stopPropagation(); ctx.startDetachBox(e, e.currentTarget, k) }}>
+      {children}
+    </div>
+  )
+}
+
+function EfIn({ ctx, k, ph, style }: { ctx: EfCtx; k: string; ph?: string; style?: CSSProperties }): ReactNode {
+  const v = ctx.f[k] || ''
+  if (!ctx.editable) return <>{v || ph || ''}</>
+  return (
+    <span className="cardedit" data-ph={ph || '내용 입력'} style={style}
+      contentEditable suppressContentEditableWarning
+      onFocus={ctx.selectAllOnFocus}
+      onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); (e.currentTarget as HTMLElement).blur() } }}
+      onBlur={(e) => { const t = e.currentTarget.textContent || ''; if (t !== (ctx.f[k] || '')) ctx.updateField(ctx.page.id, k, t) }}
+    >{v}</span>
+  )
+}
+
+function EfPair({ ctx, k, sep, lph, rph, lStyle, rStyle, noStop }: { ctx: EfCtx; k: string; sep: string; lph?: string; rph?: string; lStyle?: CSSProperties; rStyle?: CSSProperties; noStop?: boolean }): ReactNode {
+  const raw = ctx.f[k] || ''
+  const i = raw.indexOf(sep)
+  const lv = i >= 0 ? raw.slice(0, i) : raw
+  const rv = i >= 0 ? raw.slice(i + sep.length) : ''
+  if (ctx.page.detached && ctx.page.detached.includes(k)) return <span style={{ visibility: 'hidden' }}>{raw}</span>
+  if (!ctx.editable) return (<>{<span style={lStyle}>{lv}</span>}{rv ? <span style={rStyle}>{rv}</span> : null}</>)
+  const commit = (nl: string, nr: string) => { const c = nr ? nl + sep + nr : nl; if (c !== raw) ctx.updateField(ctx.page.id, k, c) }
+  const cell = (val: string, ph: string, st: CSSProperties | undefined, done: (t: string) => void): ReactNode => (
+    <span className="cardedit" data-ph={ph} style={st} contentEditable suppressContentEditableWarning
+      onFocus={ctx.selectAllOnFocus}
+      onPointerDown={noStop ? undefined : (e) => e.stopPropagation()}
+      onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); (e.currentTarget as HTMLElement).blur() } }}
+      onBlur={(e) => done(e.currentTarget.textContent || '')}>{val}</span>
+  )
+  return (<>{cell(lv, lph || '', lStyle, (t) => commit(t, rv))}{cell(rv, rph || '', rStyle, (t) => commit(lv, t))}</>)
+}
+
+export default function PageView({ page, docTitle, orientation, size, font, tocItems = [], editable = false }: PageViewProps) {
+  const updateField = useBuilder((s) => s.updateField)
+  const moveEls = useBuilder((s) => s.moveEls)
+  const detachField = useBuilder((s) => s.detachField)
+  const detachBox = useBuilder((s) => s.detachBox)
+  const setSel = useCanvasUI((s) => s.setSel)
+  const pageRef = useRef<HTMLDivElement>(null)
   const { W, H, SC, land } = pageSize(orientation)
+  // 문서 테마(EVER-PEAK 라이트/다크) — 페이지(종이) 색만 이 토큰을 따른다.
+  const theme = useBuilder((s) => s.theme)
+  const T = themeTokens(theme)
+  const isDark = theme === 'dark'
   // 슬라이드 페이지 — 배경만 그리고, 내용은 캔버스(FreeLayer) 요소로 직접 편집한다(구글 슬라이드식).
   if (page.cardKey === 'slide') {
-    const bg = page.bg || '#ffffff'
-    return <div style={{ width: W, height: H, background: bg, borderRadius: 8, boxShadow: '0 14px 40px rgba(20,25,40,.18)', overflow: 'hidden' }} />
+    const bg = page.bg || T.page
+    return <div style={{ width: W, height: H, backgroundColor: bg, ...paperBgStyle(page.paper), borderRadius: 8, boxShadow: '0 14px 40px rgba(20,25,40,.18)', overflow: 'hidden' }} />
   }
   // 덱 슬라이드 페이지 — 변환된 슬라이드 이미지를 한 장 통째로.
   if (page.cardKey === 'deckslide') {
@@ -79,77 +174,182 @@ export default function PageView({ page, docTitle, orientation, size, font, tocI
   const fontFamily = font === 'auto' ? "-apple-system, 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" : font
   const card = cardByKey(page.cardKey)
   const f = page.fields
+  // 인라인 편집 필드 — 편집 모드에선 contentEditable 스팬(FreeLayer 위 z-index:4)으로 그 자리에서 수정.
+  // 비편집(내보내기/미리보기)에선 값(또는 자리표시자 대체값)만 그린다.
+  // 항목을 드래그하면 그 자리 그대로 자유 객체로 떼어내 따라 움직인다(문턱 넘을 때만).
+  function startDetachDrag(e: React.PointerEvent<HTMLElement>, boxEl: HTMLElement, styleEl: HTMLElement, k: string, text: string) {
+    const sx = e.clientX, sy = e.clientY
+    let id: number | null = null, startX = 0, startY = 0
+    const move = (ev: PointerEvent) => {
+      if (id == null && Math.abs(ev.clientX - sx) + Math.abs(ev.clientY - sy) > 5) {
+        const pr = pageRef.current ? pageRef.current.getBoundingClientRect() : null
+        if (!pr) return
+        const r = boxEl.getBoundingClientRect(); const cs = window.getComputedStyle(styleEl)
+        pushSnap(page.id, JSON.stringify({ els: page.els, conns: page.conns, strokes: page.strokes, detached: page.detached }))
+        id = detachField(page.id, k, { x: Math.round(r.left - pr.left), y: Math.round(r.top - pr.top), w: Math.round(r.width), h: Math.round(r.height), text, fs: parseFloat(cs.fontSize) || 14, tcolor: cs.color, bold: parseInt(cs.fontWeight, 10) >= 600, align: (cs.textAlign as 'left' | 'center' | 'right') })
+        setSel(id); startX = Math.round(r.left - pr.left); startY = Math.round(r.top - pr.top)
+      }
+      if (id != null) moveEls(page.id, [{ id, x: startX + (ev.clientX - sx), y: startY + (ev.clientY - sy) }])
+    }
+    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up) }
+    window.addEventListener('pointermove', move); window.addEventListener('pointerup', up)
+  }
+  // 스타일 박스(배경/테두리 있는 칸)를 통째로 떼어낸다 — 드래그 시 박스 객체로 분리, 그 칸은 숨김.
+  function startDetachBox(e: React.PointerEvent<HTMLElement>, boxEl: HTMLElement, k: string) {
+    const sx = e.clientX, sy = e.clientY
+    let id: number | null = null, startX = 0, startY = 0
+    const move = (ev: PointerEvent) => {
+      if (id == null && Math.abs(ev.clientX - sx) + Math.abs(ev.clientY - sy) > 5) {
+        const pr = pageRef.current ? pageRef.current.getBoundingClientRect() : null
+        if (!pr) return
+        const r = boxEl.getBoundingClientRect(); const cs = window.getComputedStyle(boxEl)
+        const bw = parseFloat(cs.borderTopWidth) || 0
+        const bstyle = cs.borderTopStyle
+        pushSnap(page.id, JSON.stringify({ els: page.els, conns: page.conns, strokes: page.strokes, detached: page.detached }))
+        id = detachBox(page.id, k, {
+          x: Math.round(r.left - pr.left), y: Math.round(r.top - pr.top),
+          w: Math.round(r.width), h: Math.round(r.height),
+          text: boxEl.textContent || '', fs: parseFloat(cs.fontSize) || 14,
+          tcolor: cs.color, bold: parseInt(cs.fontWeight, 10) >= 600,
+          fill: cs.backgroundColor,
+          borderColor: (bw > 0 && bstyle !== 'none') ? cs.borderTopColor : undefined,
+          borderWidth: (bw > 0 && bstyle !== 'none') ? bw : undefined,
+        })
+        setSel(id); startX = Math.round(r.left - pr.left); startY = Math.round(r.top - pr.top)
+      }
+      if (id != null) moveEls(page.id, [{ id, x: startX + (ev.clientX - sx), y: startY + (ev.clientY - sy) }])
+    }
+    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up) }
+    window.addEventListener('pointermove', move); window.addEventListener('pointerup', up)
+  }
+  // 스타일 박스 래퍼 — 안의 글자는 클릭하면 편집, 드래그하면 박스째 떼어냄. 떼어내면 그 칸은 자리만 남기고 숨김.
+  // 박스 안에서 쓰는 인라인 편집(자체 떼어내기 없음 — 클릭=편집, 드래그는 부모 박스가 처리).
+  // 복합 필드(한 칸에 두 값: "이름:값" / "제목|설명") — 두 조각을 각각 인라인 편집, blur 시 합쳐 저장.
+  const ctx: EfCtx = { f, page, editable, updateField, selectAllOnFocus, startDetachDrag, startDetachBox }
   const gc = groupColor(card ? card.group : undefined)
-  const noteBg = (card && card.viz === 'note' && page.bg) ? page.bg : '#fff'
+  const noteBg = (card && card.viz === 'note' && page.bg) ? page.bg : T.page
   const isCover = !!(card && card.kind === 'cover')
 
-  const bookStyle: CSSProperties = { width: W, height: H, fontFamily, background: isCover ? colors.navy : noteBg, borderRadius: 8, boxShadow: '0 14px 40px rgba(20,25,40,.18)', position: 'relative', overflow: 'hidden' }
-  const pg: CSSProperties = { position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', padding: pad + 'px ' + (pad - 4) + 'px', boxSizing: 'border-box', color: colors.ink }
-  const eyebrow: CSSProperties = { fontSize: 11.5, letterSpacing: 2, textTransform: 'uppercase', color: '#9aa2b1', fontWeight: 700 }
-  const divider = '1px solid #eef0f4'
+  const bookStyle: CSSProperties = { width: W, height: H, fontFamily, backgroundColor: isCover ? T.coverBg : noteBg, ...paperBgStyle(page.paper), borderRadius: 8, boxShadow: '0 14px 40px rgba(20,25,40,.18)', position: 'relative', overflow: 'hidden' }
+  const pg: CSSProperties = { position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', padding: pad + 'px ' + (pad - 4) + 'px', boxSizing: 'border-box', color: T.body }
+  const eyebrow: CSSProperties = { fontSize: 11.5, letterSpacing: 2, textTransform: 'uppercase', color: T.kick, fontWeight: 800 }
+  const divider = '1px solid ' + T.line
+  // EVER-PEAK 하단 푸터(표지 제외 페이지 공통)
+  const footer = (right: string): ReactNode => (
+    <div style={{ position: 'absolute', left: pad, right: pad, bottom: Math.round(pad * 0.55), display: 'flex', justifyContent: 'space-between', fontSize: BODY * 0.62, letterSpacing: 1.4, textTransform: 'uppercase', color: T.footer }}>
+      <span>EVER-PEAK · UNIEVER</span><span>{right}</span>
+    </div>
+  )
 
   let inner: ReactNode = null
   if (card && card.kind === 'cover') {
-    inner = (<div style={{ ...pg, color: '#fff' }}>
+    inner = (<div style={{ ...pg, color: T.coverInk }}>
       <div style={{ ...eyebrow, color: 'rgba(255,255,255,.55)' }}>{docTitle}</div>
       <div style={{ margin: 'auto 0' }}>
-        <div style={{ fontSize: H1 * 1.2, fontWeight: 800, lineHeight: 1.15, letterSpacing: -1, color: '#fff' }}>{f.title || card.title}</div>
-        <div style={{ color: 'rgba(255,255,255,.78)', fontSize: BODY, marginTop: 10 }}>{f.sub}</div>
+        <div style={{ fontSize: H1 * 1.2, fontWeight: 800, lineHeight: 1.15, letterSpacing: -1, color: '#fff' }}><Ef ctx={ctx} k="title" ph={card.title} /></div>
+        {(f.sub || editable) ? <div style={{ color: 'rgba(255,255,255,.78)', fontSize: BODY, marginTop: 10 }}><Ef ctx={ctx} k="sub" ph="부제" /></div> : null}
       </div>
-      <div style={{ height: 8, width: 52, borderRadius: 4, background: colors.blue }} />
+      <div style={{ height: 8, width: 52, borderRadius: 4, background: T.blue }} />
     </div>)
   } else if (card && card.kind === 'back') {
     inner = (<div style={{ ...pg, justifyContent: 'center', textAlign: 'center' }}>
-      <div style={{ fontSize: H1, fontWeight: 700, lineHeight: 1.15 }}>{f.title || card.title}</div>
-      <div style={{ color: colors.muted, fontSize: BODY, marginTop: 10 }}>{f.sub}</div>
+      <div style={{ fontSize: H1, fontWeight: 700, lineHeight: 1.15, color: T.ink }}><Ef ctx={ctx} k="title" ph={card.title} /></div>
+      {(f.sub || editable) ? <div style={{ color: T.sub, fontSize: BODY, marginTop: 10 }}><Ef ctx={ctx} k="sub" ph="부제(선택)" /></div> : null}
     </div>)
   } else if (card && card.kind === 'toc') {
+    // EVER-PEAK 목차 — 번호칩 + 제목 + 페이지번호. 각 줄에 data-goto-seq(M2 핫스팟 좌표 산출용).
     inner = (<div style={pg}>
-      <div style={eyebrow}>목차</div>
-      <div style={{ fontSize: H1, fontWeight: 700, marginTop: 6 }}>목차</div>
-      <ul style={{ marginTop: 14, listStyle: 'none', padding: 0, fontSize: BODY }}>
-        {tocItems.length ? tocItems.map((t, i) => (<li key={i} style={{ padding: '8px 0', borderTop: divider, color: '#3a4150' }}>{t.seq}. {t.title}</li>)) : <li style={{ color: '#aab' }}>카드를 추가하면 여기에</li>}
+      <div style={eyebrow}>Contents</div>
+      <div style={{ fontSize: H1, fontWeight: 800, marginTop: 6, color: T.ink }}>{f.title || '목차'}</div>
+      <div style={{ height: 1, background: T.line, margin: '16px 0 2px' }} />
+      <ul style={{ margin: 0, listStyle: 'none', padding: 0, flex: 1 }}>
+        {tocItems.length ? tocItems.map((t, i) => (
+          <li key={i} data-goto-seq={t.seq} className="toc-row" style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto', alignItems: 'baseline', gap: BODY, padding: (BODY * 0.62) + 'px 4px', borderBottom: divider }}>
+            <span style={{ fontSize: BODY * 0.82, fontWeight: 800, color: T.blue, fontVariantNumeric: 'tabular-nums' }}>{String(t.seq).padStart(2, '0')}</span>
+            <span style={{ fontSize: BODY * 1.12, fontWeight: 800, color: T.ink }}>{t.title}</span>
+            <span style={{ fontSize: BODY * 0.8, color: T.muted, fontVariantNumeric: 'tabular-nums' }}>{String(t.page).padStart(2, '0')}</span>
+          </li>
+        )) : <li style={{ color: T.muted, padding: '8px 0' }}>카드를 추가하면 여기에</li>}
       </ul>
+      {footer('')}
+    </div>)
+  } else if (page.cardKey === 'dsection') {
+    // 덱-섹션(P1) — deck_builder 섹션 슬라이드 룩: 번호 태그 + 제목 + 부제 + 카드 그리드(EVER-PEAK).
+    // c1~c6 각 "제목|설명". 역할 kind 없음 → exportBook 에서 content 로 처리.
+    const cols = f.cols === '2' ? 2 : 3
+    const items = ['c1', 'c2', 'c3', 'c4', 'c5', 'c6'].map((k) => ({ k, v: f[k] })).filter((x) => x.v)
+    inner = (<div style={pg}>
+      {(f.markN || editable) ? <div style={{ ...eyebrow, letterSpacing: 1.5, color: T.blue }}><Ef ctx={ctx} k="markN" ph="번호" /></div> : null}
+      <div style={{ fontSize: H1, fontWeight: 800, marginTop: 6, lineHeight: 1.15, letterSpacing: -0.6, color: T.ink }}><Ef ctx={ctx} k="title" ph="섹션" /></div>
+      {(f.sub || editable) ? <div style={{ color: T.sub, fontSize: BODY, marginTop: 8, lineHeight: 1.5 }}><Ef ctx={ctx} k="sub" ph="부제(선택)" /></div> : null}
+      <div style={{ marginTop: 'auto', display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`, gap: Math.round(10 * SC) }}>
+        {items.map((it, i) => (
+          <EfBox ctx={ctx} key={i} k={it.k} boxStyle={{ background: T.card, border: divider, borderRadius: 10, padding: Math.round(13 * SC) + 'px ' + Math.round(14 * SC) + 'px', minHeight: Math.round(56 * SC), wordBreak: 'keep-all', display: 'flex', flexDirection: 'column', gap: 5 }}>
+            <EfPair ctx={ctx} k={it.k} sep="|" noStop lph="제목" rph="설명" lStyle={{ fontSize: BODY * 1.02, fontWeight: 800, color: T.ink, letterSpacing: -0.3 }} rStyle={{ fontSize: BODY * 0.86, color: T.sub, lineHeight: 1.4 }} />
+          </EfBox>
+        ))}
+      </div>
+      {footer('')}
     </div>)
   } else if (card && card.kpi) {
-    const rows = ['k1', 'k2', 'k3'].map((k) => f[k]).filter(Boolean).map((sv, i) => {
-      const idx = sv.indexOf(':'); const a = idx >= 0 ? sv.slice(0, idx) : sv; const b = idx >= 0 ? sv.slice(idx + 1) : ''
-      return (<div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '9px 0', borderTop: divider }}><span style={{ color: '#6b7382' }}>{a}</span><b style={{ fontSize: '1.4em' }}>{b}</b></div>)
-    })
-    inner = (<div style={pg}><div style={eyebrow}>성과</div><div style={{ fontSize: H1, fontWeight: 700, marginTop: 6 }}>{f.title || card.title}</div><div style={{ marginTop: 'auto', fontSize: BODY }}>{rows}</div></div>)
+    const rows = ['k1', 'k2', 'k3'].map((k) => ({ k, v: f[k] })).filter((x) => x.v).map((row, i) => (
+      <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', padding: '9px 0', borderTop: divider }}>
+        <EfPair ctx={ctx} k={row.k} sep=":" lph="지표" rph="값" lStyle={{ color: T.sub }} rStyle={{ fontSize: '1.4em', fontWeight: 800, color: T.ink }} />
+      </div>
+    ))
+    inner = (<div style={pg}><div style={eyebrow}>성과</div><div style={{ fontSize: H1, fontWeight: 700, marginTop: 6, color: T.ink }}><Ef ctx={ctx} k="title" ph={card.title} /></div><div style={{ marginTop: 'auto', fontSize: BODY }}>{rows}</div></div>)
   } else if (card && card.viz === 'flow') {
-    const steps = ['s1', 's2', 's3', 's4'].map((k) => f[k]).filter(Boolean)
+    const steps = ['s1', 's2', 's3', 's4'].map((k) => ({ k, v: f[k] })).filter((x) => x.v)
     const items: ReactNode[] = []
     steps.forEach((s, i) => {
-      if (i > 0) items.push(<span key={'a' + i} style={{ color: '#9aa2b1', fontWeight: 700, fontSize: 16 }}>{land ? '→' : '↓'}</span>)
-      items.push(<div key={'n' + i} style={{ background: '#fff', border: '1.5px solid #cfd5e2', borderRadius: 8, padding: '8px 13px', fontSize: BODY, fontWeight: 600, color: '#2a3346' }}>{s}</div>)
+      if (i > 0) items.push(<span key={'a' + i} style={{ color: T.muted, fontWeight: 700, fontSize: 16 }}>{land ? '→' : '↓'}</span>)
+      items.push(<EfBox ctx={ctx} key={'n' + i} k={s.k} boxStyle={{ background: T.card, border: '1.5px solid ' + T.line, borderRadius: 8, padding: '8px 13px', fontSize: BODY, fontWeight: 600, color: T.body }}><EfIn ctx={ctx} k={s.k} ph={'단계 ' + (i + 1)} /></EfBox>)
     })
-    inner = (<div style={pg}><div style={eyebrow}>프로세스</div><div style={{ fontSize: H1, fontWeight: 700, marginTop: 6 }}>{f.title || card.title}</div>
+    inner = (<div style={pg}><div style={eyebrow}>프로세스</div><div style={{ fontSize: H1, fontWeight: 700, marginTop: 6, color: T.ink }}><Ef ctx={ctx} k="title" ph={card.title} /></div>
       <div style={{ margin: 'auto 0', display: 'flex', flexDirection: land ? 'row' : 'column', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'center', gap: 8 }}>{items}</div></div>)
   } else if (card && card.viz === 'mindmap') {
-    inner = (<div style={pg}><div style={eyebrow}>마인드맵</div><div style={{ fontSize: H1, fontWeight: 700, marginTop: 6 }}>{f.title || card.title}</div>
-      <div style={{ display: 'flex', justifyContent: 'center', margin: 'auto 0' }} dangerouslySetInnerHTML={{ __html: mindmapSVG(f, land, SC) }} /></div>)
+    const brs = ['b1', 'b2', 'b3', 'b4', 'b5'].map((k) => ({ k, v: f[k] })).filter((x) => x.v || editable)
+    const vw = land ? 360 : 250, vh = land ? 190 : 220, cx = vw / 2, cy = vh / 2, rx = vw * 0.34, ry = vh * 0.33
+    const n = Math.max(brs.length, 1)
+    const pts = brs.map((b, i) => { const a = (-90 + i * (360 / n)) * Math.PI / 180; return { k: b.k, x: cx + rx * Math.cos(a), y: cy + ry * Math.sin(a) } })
+    const MW = vw * SC, MH = vh * SC
+    inner = (<div style={pg}><div style={eyebrow}>마인드맵</div><div style={{ fontSize: H1, fontWeight: 700, marginTop: 6, color: T.ink }}><Ef ctx={ctx} k="title" ph={card.title} /></div>
+      <div style={{ display: 'flex', justifyContent: 'center', margin: 'auto 0' }}>
+        <div style={{ position: 'relative', width: MW, height: MH }}>
+          <svg width={MW} height={MH} viewBox={`0 0 ${vw} ${vh}`} style={{ position: 'absolute', inset: 0 }}>
+            {pts.map((p, i) => (<line key={'l' + i} x1={cx} y1={cy} x2={p.x} y2={p.y} stroke="#c3cbdb" strokeWidth={1.5} />))}
+            {pts.map((p, i) => (<circle key={'d' + i} cx={p.x} cy={p.y} r={3.5} fill="#2f6df6" />))}
+            <rect x={cx - 48} y={cy - 15} width={96} height={30} rx={15} fill="#111318" />
+          </svg>
+          <div style={{ position: 'absolute', left: cx * SC, top: cy * SC, transform: 'translate(-50%,-50%)', color: '#fff', fontWeight: 700, fontSize: 11 * SC, maxWidth: 92 * SC, textAlign: 'center', lineHeight: 1.1 }}><Ef ctx={ctx} k="center" ph="중심 주제" /></div>
+          {pts.map((p, i) => (<div key={'t' + i} style={{ position: 'absolute', left: p.x * SC, top: p.y * SC, transform: 'translate(-50%,-50%)', fontSize: 10.5 * SC, color: '#3a4150', background: 'rgba(255,255,255,.9)', padding: '1px 5px', borderRadius: 5, whiteSpace: 'nowrap', boxShadow: '0 1px 3px rgba(0,0,0,.12)' }}><Ef ctx={ctx} k={p.k} ph={'가지 ' + (i + 1)} /></div>))}
+        </div>
+      </div></div>)
   } else if (card && (card.viz === 'sticky' || card.viz === 'board')) {
     const cols = ['#fdf3b6', '#cdeacf', '#f4d2c1', '#e7e3fb', '#dceeb1', '#f9d0e0']
     const keys = card.viz === 'board' ? ['n1', 'n2', 'n3', 'n4', 'n5', 'n6'] : ['n1', 'n2', 'n3', 'n4']
-    const notes = keys.map((k) => f[k]).filter(Boolean)
-    inner = (<div style={pg}><div style={eyebrow}>{card.viz === 'board' ? '자유 보드' : '메모'}</div><div style={{ fontSize: H1, fontWeight: 700, marginTop: 6 }}>{f.title || card.title}</div>
+    const notes = keys.map((k) => ({ k, v: f[k] })).filter((x) => x.v)
+    inner = (<div style={pg}><div style={eyebrow}>{card.viz === 'board' ? '자유 보드' : '메모'}</div><div style={{ fontSize: H1, fontWeight: 700, marginTop: 6, color: T.ink }}><Ef ctx={ctx} k="title" ph={card.title} /></div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 9, marginTop: 16, alignContent: 'flex-start' }}>
-        {notes.map((t, i) => (<div key={i} style={{ width: 'calc(50% - 5px)', minHeight: 60, borderRadius: 3, padding: '10px 11px', fontSize: 12.5, lineHeight: 1.35, color: '#39371f', boxShadow: '0 2px 6px rgba(0,0,0,.12)', background: cols[i % cols.length], transform: card.viz === 'board' ? (i % 2 ? 'rotate(2.5deg)' : 'rotate(-2.5deg)') : 'none' }}>{t}</div>))}
+        {notes.map((nt, i) => (<EfBox ctx={ctx} key={i} k={nt.k} boxStyle={{ width: 'calc(50% - 5px)', minHeight: 60, borderRadius: 3, padding: '10px 11px', fontSize: 12.5, lineHeight: 1.35, color: '#39371f', boxShadow: '0 2px 6px rgba(0,0,0,.12)', background: cols[i % cols.length], transform: card.viz === 'board' ? (i % 2 ? 'rotate(2.5deg)' : 'rotate(-2.5deg)') : 'none' }}><EfIn ctx={ctx} k={nt.k} ph={'메모 ' + (i + 1)} /></EfBox>))}
       </div></div>)
   } else if (card && card.viz === 'note') {
     const blocks = page.blocks || []
-    const dark = noteBg === '#111318'
+    const dark = isDark || noteBg === '#111318' || noteBg === '#0e1c30'
     const col = dark ? '#f2f4f8' : colors.ink
     const sub = dark ? '#c4ccda' : '#3a4150'
-    const renderB = (b: typeof blocks[number], key: string, child: boolean): ReactNode => {
+    const renderB = (b: typeof blocks[number], key: string, child: boolean, ord = 0): ReactNode => {
       const fsc = b.fs || 1                                   // HWP 글자모양: 크기 배율
       const bcol = b.color || col                             // HWP 글자모양: 색
       const base: CSSProperties = { textAlign: (b.align || 'left'), margin: '5px 0', lineHeight: 1.32, color: bcol, fontWeight: b.bold ? 800 : 500 }
       if (b.type === 'divider') return <div key={key} style={{ height: 1, background: dark ? '#3a4150' : '#e4e7ee', margin: '10px 0' }} />
       if (b.type === 'h1') return <div key={key} style={{ ...base, fontSize: H1 * 0.82 * fsc, fontWeight: 800, letterSpacing: -0.5 }}>{b.text}</div>
       if (b.type === 'h2') return <div key={key} style={{ ...base, fontSize: BODY * 1.3 * fsc, fontWeight: 800 }}>{b.text}</div>
+      if (b.type === 'h3') return <div key={key} style={{ ...base, fontSize: BODY * 1.12 * fsc, fontWeight: 800 }}>{b.text}</div>
+      if (b.type === 'h4') return <div key={key} style={{ ...base, fontSize: BODY * 1.0 * fsc, fontWeight: 800 }}>{b.text}</div>
       if (b.type === 'bullet') return <div key={key} style={{ ...base, fontSize: BODY * fsc, paddingLeft: child ? 26 : 14 }}>•&nbsp;&nbsp;{b.text}</div>
+      if (b.type === 'numbered') return <div key={key} style={{ ...base, fontSize: BODY * fsc, paddingLeft: child ? 26 : 14 }}>{ord}.&nbsp;&nbsp;{b.text}</div>
+      if (b.type === 'todo') return <div key={key} style={{ ...base, fontSize: BODY * fsc, paddingLeft: child ? 26 : 14, color: b.done ? (dark ? '#8a93a6' : '#9aa2b1') : bcol, textDecoration: b.done ? 'line-through' : undefined }}>{b.done ? '☑' : '☐'}&nbsp;&nbsp;{b.text}</div>
       if (b.type === 'toggle') return <div key={key} style={{ ...base, fontSize: BODY * 1.14 * fsc, fontWeight: 800 }}>▾&nbsp;{b.text}</div>
       if (b.type === 'callout') {
         const tone = b.tone || 'info'
@@ -160,17 +360,20 @@ export default function PageView({ page, docTitle, orientation, size, font, tocI
       return <div key={key} style={{ ...base, fontSize: BODY * fsc, color: b.color || (b.bold ? col : sub), paddingLeft: child ? 14 : 0 }}>{b.text}</div>
     }
     const nodes: ReactNode[] = []
+    let numOrd = 0
     blocks.forEach((b, i) => {
-      nodes.push(renderB(b, 'b' + i, false))
+      if (b.type === 'numbered') numOrd++; else numOrd = 0
+      nodes.push(renderB(b, 'b' + i, false, numOrd))
       if (b.type === 'toggle' && b.children) b.children.forEach((c, j) => nodes.push(renderB(c, 'c' + i + '_' + j, true)))
     })
     inner = (<div style={{ ...pg, overflow: 'hidden' }}><FitBox maxH={H - pad * 2}>{nodes}</FitBox></div>)
   } else {
-    const pts = ['p1', 'p2', 'p3'].map((k) => f[k]).filter(Boolean)
+    const bodyFields = (card ? card.fields : []).filter((fd) => fd.key !== 'title')
+    const pts = bodyFields.map((fd) => ({ k: fd.key, v: f[fd.key], ph: fd.label })).filter((x) => x.v)
     inner = (<div style={pg}><div style={eyebrow}>{card ? card.label : ''}</div>
-      <div style={{ fontSize: H1, fontWeight: 700, marginTop: 6, lineHeight: 1.15, letterSpacing: -1 }}>{f.title || (card ? card.title : '')}</div>
-      <ul style={{ marginTop: 'auto', listStyle: 'none', padding: 0, fontSize: BODY }}>{pts.map((t, i) => (<li key={i} style={{ padding: '9px 0', borderTop: divider, fontWeight: 500, color: '#3a4150' }}>{t}</li>))}</ul>
+      <div style={{ fontSize: H1, fontWeight: 800, marginTop: 6, lineHeight: 1.15, letterSpacing: -1, color: T.ink }}><Ef ctx={ctx} k="title" ph={card ? card.title : '제목'} /></div>
+      <ul style={{ marginTop: 'auto', listStyle: 'none', padding: 0, fontSize: BODY }}>{pts.map((pt, i) => (<li key={i} style={{ padding: '9px 0', borderTop: divider, fontWeight: 500, color: T.sub }}><Ef ctx={ctx} k={pt.k} ph={pt.ph} /></li>))}</ul>
       <div style={{ height: 8, width: 40, borderRadius: 4, background: gc }} /></div>)
   }
-  return (<div style={bookStyle}>{inner}</div>)
+  return (<div ref={pageRef} style={bookStyle}>{inner}</div>)
 }

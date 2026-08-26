@@ -63,6 +63,23 @@ check(r3.get("status") == "confirm_required", "→ make_ebook 확인 요청으�
 r4 = chat.respond("도형 넣어줘", None, book_state={"pages": []})
 check((r4.get("ui_action") or {}).get("type") == "insert_element", "편집 명령 '도형' → insert_element(생성 레인 안 탐)")
 
+# ── (G6) 자동 export opt-in: 신호 없으면 export_after=False, 있으면 True ──
+_warns["v"] = []
+r5 = chat.respond("유니에버 AI팩토리 소개 이북 만들어줘", None, book_state={"pages": []})
+check((r5["ui_action"]["payload"].get("export_after")) is False, "export 신호 없음 → export_after=False")
+r6 = chat.respond("품질 AI 이북 만들어서 바로 뽑아줘", None, book_state={"pages": []})
+check((r6["ui_action"]["payload"].get("export_after")) is True, "‘뽑아줘’ 신호 → export_after=True")
+check("이북(PDF)까지" in r6["answer"], "export 시 답변에 이북까지 안내")
+
+# ── (G6) 자기검증: 과장·빈필드가 있는 계획이면 답변에 ⚠ ──
+_warns["v"] = []
+planner_mod.make_plan = lambda brief, llm_fn, book_state=None, retries=2: {
+    "ok": True, "source": "llm", "warnings": [],
+    "plan": {"title": "T", "orientation": "portrait", "theme": "light",
+             "pages": [{"cardKey": "summary", "fields": {"title": "요약", "body": "업계 최고의 완벽한 솔루션"}}]}}
+r7 = chat.respond("소개 이북 만들어줘", None, book_state={"pages": []})
+check("⚠" in r7["answer"] and "과장" in r7["answer"], f"자기검증 과장 경고 노출: {r7['answer'][-40:]}")
+
 if fails:
     print(f"\n{len(fails)} FAIL: {fails}")
     sys.exit(1)
