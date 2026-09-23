@@ -10,7 +10,9 @@ export default function Palette() {
   return (<div>
     {GROUPS.map((g) => (<div key={g.key}>
       <div className="grp">{g.label}</div>
-      {CARD_REGISTRY.filter((c) => c.group === g.key).map((c) => (
+      {/* 감춘 카드는 여기에도 안 나온다(registry.ts `hidden` · EVER-SKETCH1 e8f80f7). 지금 그리는 곳이
+          안 보여도 걸어 둔다 — 되살아났을 때 「목록에서 뺐는데 어딘가엔 있다」가 되면 찾기 어렵다. */}
+      {CARD_REGISTRY.filter((c) => c.group === g.key && !c.hidden).map((c) => (
         <button key={c.key} className="chip" onClick={() => addCard(c.key)}>{c.label}<span className="plus">＋</span></button>
       ))}
     </div>))}

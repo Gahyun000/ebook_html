@@ -5,6 +5,15 @@ export interface CardDef {
   kind?: 'cover' | 'back' | 'toc'
   viz?: 'flow' | 'mindmap' | 'sticky' | 'board' | 'note'
   kpi?: boolean
+  /**
+   * **목록에서만 감춘다. 등록은 남긴다**(EVER-SKETCH1 e8f80f7 · 사용자 요청).
+   *
+   * 「빈 화면이나 다름없다」는 카드 여섯을 새 페이지 목록에서 치운다. 줄을 지우면 없어지는 것이
+   * 목록만이 아니다 — `PageView` 가 이 등록을 보고 본문을 그린다. 지우면 그 카드로 만들어 둔 쪽이
+   * **제목만 남고 조용히 빈다.** 그래서 **새로 만드는 길만 막고 그리는 길은 남긴다.**
+   * 이 표시를 보는 곳: 카드 고르기(CardPicker) · Palette · 서버 사본(card_catalog.py — AI 에게 안 권한다).
+   */
+  hidden?: boolean
   fields: CardField[]
 }
 const f = (key: string, label: string, example = ''): CardField => ({ key, label, example })
@@ -15,15 +24,15 @@ export const CARD_REGISTRY: CardDef[] = [
   { key: 'note', group: 'frame', label: '빈 페이지(블록·토글)', title: '새 페이지', viz: 'note', fields: [] },
   { key: 'closing', group: 'frame', label: '마무리', title: '함께 시작합시다', kind: 'back',
     fields: [f('title', '한 줄 메시지', '지금이 가장 잘 시작할 수 있는 때입니다'), f('sub', '연락/링크(선택)')] },
-  { key: 'summary', group: 'extra', label: '한 줄 요약', title: '핵심 요약',
+  { key: 'summary', group: 'extra', hidden: true, label: '한 줄 요약', title: '핵심 요약',
     fields: [f('title', '제목', '핵심 요약'), { key: 'body', label: '한 문장', example: '현장 데이터로 품질을 바꾸는 AX 사업', textarea: true }] },
-  { key: 'kpi', group: 'extra', label: '성과·KPI', title: '기대 성과', kpi: true,
+  { key: 'kpi', group: 'extra', hidden: true, label: '성과·KPI', title: '기대 성과', kpi: true,
     fields: [f('title', '제목', '기대 성과'), f('k1', '지표 1 (이름:값)', '불량률:-30%'), f('k2', '지표 2', '검사시간:-40%'), f('k3', '지표 3', 'ROI:14개월')] },
-  { key: 'roadmap', group: 'extra', label: '로드맵', title: '로드맵',
+  { key: 'roadmap', group: 'extra', hidden: true, label: '로드맵', title: '로드맵',
     fields: [f('title', '제목', '로드맵'), f('p1', '단계 (이름:시기)', 'PoC : 1분기'), f('p2', '단계', '확산 : 3분기')] },
-  { key: 'market', group: 'extra', label: '시장·경쟁', title: '시장과 경쟁',
+  { key: 'market', group: 'extra', hidden: true, label: '시장·경쟁', title: '시장과 경쟁',
     fields: [f('title', '제목', '시장과 경쟁'), f('p1', '시장 한 줄', '국내 품질SW 3천억'), f('p2', '우위', '현장 특화 데이터')] },
-  { key: 'flow', group: 'viz', label: '프로세스(플로우)', title: '도입 프로세스', viz: 'flow',
+  { key: 'flow', group: 'viz', hidden: true, label: '프로세스(플로우)', title: '도입 프로세스', viz: 'flow',
     fields: [f('title', '제목', '도입 프로세스'), f('s1', '단계 1', '데이터 연결'), f('s2', '단계 2', 'AI 학습'), f('s3', '단계 3', '현장 적용'), f('s4', '단계 4 (선택)', '성과 검증')] },
   { key: 'mindmap', group: 'viz', label: '마인드맵', title: 'AX 추진 영역', viz: 'mindmap',
     fields: [f('title', '제목', 'AX 추진 영역'), f('center', '중심 주제', '유니에버 AX'), f('b1', '가지 1', '품질'), f('b2', '가지 2', '생산'), f('b3', '가지 3', '물류'), f('b4', '가지 4 (선택)', '경영정보'), f('b5', '가지 5 (선택)')] },
@@ -31,7 +40,7 @@ export const CARD_REGISTRY: CardDef[] = [
     fields: [f('title', '제목', '아이디어 메모'), f('n1', '메모 1', '현장 니즈 인터뷰'), f('n2', '메모 2', 'PoC 대상 라인'), f('n3', '메모 3', 'ROI 계산'), f('n4', '메모 4 (선택)')] },
   { key: 'board', group: 'viz', label: '자유 메모 보드', title: '자유 보드', viz: 'board',
     fields: [f('title', '제목', '자유 보드'), f('n1', '메모 1', '핵심 가설'), f('n2', '메모 2', '리스크'), f('n3', '메모 3', '다음 액션'), f('n4', '메모 4', '질문'), f('n5', '메모 5 (선택)'), f('n6', '메모 6 (선택)')] },
-  { key: 'dsection', group: 'extra', label: '덱 섹션', title: '섹션',
+  { key: 'dsection', group: 'extra', hidden: true, label: '덱 섹션', title: '섹션',
     fields: [f('markN', '번호', '01'), f('title', '제목', '제조 현장의 활용 분야'),
       { key: 'sub', label: '부제', example: '현장 데이터를 하나의 흐름으로 모읍니다.', textarea: true },
       f('cols', '열 수 (2/3)', '3'),

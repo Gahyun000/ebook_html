@@ -605,6 +605,56 @@ STAGES.push(['4단계 · PPT 식 도구줄 · 표 채우기 · 새 슬라이드 
   ok('[다시 열기] 열 너비(colw)가 그대로다', Math.abs(ratio2 - ratio) < 0.02, `${ratio.toFixed(3)} → ${ratio2.toFixed(3)}`)
 }])
 
+// 새 페이지 목록 정리(EVER-SKETCH1 e8f80f7 중 카드 감추기만 · 사용자 요청)
+STAGES.push(['4단계 · 새 페이지 목록 · 감춘 카드', async () => {
+  await freshBook()
+  const HIDDEN = ['덱 섹션', '한 줄 요약', '성과·KPI', '로드맵', '시장·경쟁', '프로세스(플로우)']
+  await p.locator('.cardpick .add').click(); await p.waitForTimeout(250)
+  const pop = p.locator('.cpk-pop')
+  const txt = await pop.innerText()
+  const quick = await pop.locator('.cpk-q').allInnerTexts()
+  ok('[새 페이지] 「＋ 빈 슬라이드」 는 그대로 있다', quick.some((t) => t.includes('빈 슬라이드')), quick.join(' · '))
+  ok('[새 페이지] 「＋ 덱 섹션」 빠른 단추가 없다', !quick.some((t) => t.includes('덱 섹션')), quick.join(' · '))
+  const tiles = await pop.locator('.cpk-tile .cpk-nm').allInnerTexts()
+  const leaked = HIDDEN.filter((h) => tiles.includes(h) || txt.includes(h))
+  ok('[새 페이지] 감춘 여섯 카드가 목록에 없다', leaked.length === 0, leaked.join(' · ') || tiles.join(' · '))
+  ok('[새 페이지] 빈 묶음 「경영 보고 보강」 은 이름도 안 그린다', !txt.includes('경영 보고 보강'))
+  await p.locator('.cpk-search').fill('KPI'); await p.waitForTimeout(150)
+  ok('[새 페이지] 검색해도 감춘 카드가 안 나온다', (await pop.locator('.cpk-tile').count()) === 0)
+  await p.locator('.cpk-search').fill(''); await p.waitForTimeout(150)
+  if (SHOT_DIR) await pop.screenshot({ path: SHOT_DIR + '/stage4_card_picker.png' })
+  await p.keyboard.press('Escape'); await p.locator('.cpk-scrim').click().catch(() => {}); await p.waitForTimeout(150)
+  let menuTxt = ''
+  for (const m of ['삽입', '슬라이드']) {
+    await p.locator('.ax-menu .ax-mwrap > button.m', { hasText: m }).first().click(); await p.waitForTimeout(120)
+    menuTxt += await p.locator('.ax-mdrop').innerText()
+    await p.locator('.ax-menu .ax-mwrap > button.m', { hasText: m }).first().click(); await p.waitForTimeout(80)
+  }
+  ok('[새 페이지] 메뉴바(삽입·슬라이드)에 「덱 섹션 카드」 가 없고 「새 슬라이드」 는 있다',
+    !/덱 섹션/.test(menuTxt) && /새 슬라이드/.test(menuTxt), menuTxt.replace(/\n/g, ' · ').slice(0, 160))
+
+  // 감춘 카드로 **이미 만든 쪽**은 그대로 그려진다 — 저장된 자료를 서버에 바로 넣고 연다.
+  const state = { title: '감춘 카드 옛 자료', orientation: 'portrait', theme: 'light', font: 'auto', size: 'm', selectedPageId: 1,
+    pages: [
+      { id: 1, cardKey: 'kpi', fields: { title: '기대 성과', k1: '불량률:-30%', k2: '검사시간:-40%' }, free: false, els: [], conns: [], strokes: [] },
+      { id: 2, cardKey: 'dsection', fields: { markN: '07', title: '옛 덱 섹션 제목', cols: '3', c1: '품질|찾고 봅니다' }, free: false, els: [], conns: [], strokes: [] },
+    ] }
+  const made = await p.evaluate(async (st) => {
+    const r = await fetch('/api/projects', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: '감춘 카드 옛 자료', state: st }) })
+    return r.ok
+  }, state)
+  ok('[옛 자료] 감춘 카드가 든 자료를 만들었다(서버)', made)
+  await p.goto(URL, { waitUntil: 'networkidle' })
+  await p.locator('.lib-open-hit', { hasText: '감춘 카드 옛 자료' }).first().click()
+  await p.waitForSelector('.ax-app .axth', { timeout: 15000 }); await p.waitForTimeout(500)
+  ok('[옛 자료] 두 쪽이 그대로 열린다', (await thumbs.count()) === 2, String(await thumbs.count()))
+  const s1 = await p.locator('.stage').first().innerText()
+  ok('[옛 자료] KPI 쪽 본문(지표)이 그려진다', /불량률/.test(s1) && /-30%/.test(s1), s1.slice(0, 80).replace(/\n/g, ' '))
+  await thumbs.nth(1).click(); await p.waitForTimeout(300)
+  const s2 = await p.locator('.stage').first().innerText()
+  ok('[옛 자료] 덱 섹션 쪽 본문이 그려진다', /옛 덱 섹션 제목/.test(s2) && /찾고 봅니다/.test(s2), s2.slice(0, 80).replace(/\n/g, ' '))
+}])
+
 for (const [name, run] of STAGES) {
   console.log(`\n# ${name}`)
   try { await run() } catch (e) { ok(`${name} 실행 중 예외 없음`, false, String(e && e.message || e)) }

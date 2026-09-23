@@ -58,12 +58,16 @@ export default function CardPicker() {
           <div className="cpk-scrim" onClick={() => setOpen(false)} />
           <div className="cpk-pop" style={{ top: pos.top, left: pos.left }}>
             <div className="cpk-quick">
+              {/* 「＋ 덱 섹션」 빠른 단추는 뺐다 — 덱 섹션은 감춘 카드다(EVER-SKETCH1 e8f80f7).
+                  「＋ 빈 슬라이드」는 그대로 둔다(사용자 요청). */}
               <button className="cpk-q" onClick={() => pick('slide')}>＋ 빈 슬라이드</button>
-              <button className="cpk-q alt" onClick={() => pick('dsection')}>＋ 덱 섹션</button>
             </div>
-            <input className="cpk-search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="카드 검색 (예: 플로우, KPI)" aria-label="카드 검색" autoFocus />
+            <input className="cpk-search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="카드 검색 (예: 마인드맵, 메모)" aria-label="카드 검색" autoFocus />
             {GROUPS.map((g) => {
-              const items = CARD_REGISTRY.filter((c) => c.group === g.key && c.key !== 'dsection' && match(c.label, c.key))
+              // **감춘 카드를 먼저 거르고, 검색은 그 뒤에 건다**(EVER-SKETCH1 e8f80f7). 순서가 반대면
+              // 감춘 카드가 검색으로 나온다. 덱 섹션만 빼던 옛 특례는 이 표시로 합쳐졌다.
+              // 묶음이 통째로 비면(경영 보고 보강) 아래 `return null` 로 이름도 안 그린다.
+              const items = CARD_REGISTRY.filter((c) => c.group === g.key && !c.hidden).filter((t) => match(t.label, t.key))
               if (!items.length) return null
               return (
                 <div key={g.key}>

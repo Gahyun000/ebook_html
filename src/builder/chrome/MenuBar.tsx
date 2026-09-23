@@ -75,8 +75,8 @@ export default function MenuBar({ onHelp, onTutorial, onSettings, onImport, onPr
       { label: '╱  선', run: () => tool('pen') },
       { label: '🅰  Word Art (글맵시)', run: () => place('wordart') },
       { sep: true },
+      // 「＋ 덱 섹션 카드」는 뺐다 — 덱 섹션은 감춘 카드다(registry.ts `hidden` · EVER-SKETCH1 e8f80f7).
       { label: '＋ 새 슬라이드', run: () => addCard('slide') },
-      { label: '＋ 덱 섹션 카드', run: () => addCard('dsection') },
     ] },
     { label: '서식', items: [
       { label: '굵게 (선택 요소)', run: () => emit('ebook:fmt-bold') },
@@ -90,7 +90,6 @@ export default function MenuBar({ onHelp, onTutorial, onSettings, onImport, onPr
       { label: '▷ 슬라이드쇼', run: onPresent },
       { sep: true },
       { label: '＋ 새 슬라이드', run: () => addCard('slide') },
-      { label: '＋ 덱 섹션 카드', run: () => addCard('dsection') },
       { label: '⧉ 슬라이드 복제', run: () => { if (selId != null) duplicatePage(selId) } },
       { label: '🗑 슬라이드 삭제', run: () => { if (selId != null) removePage(selId) } },
       { sep: true },
