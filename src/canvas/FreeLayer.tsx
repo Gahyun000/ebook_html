@@ -1,12 +1,14 @@
 import type React from 'react'
 import { useState, useEffect, useRef } from 'react'
 import { flushSync } from 'react-dom'
+import { selectWordOrCaretAtPoint } from '../lib/wordSelect'
 import { intakeImage } from '../builder/imageIntake'
 import type { CSSProperties } from 'react'
 import type { Page, FreeEl } from '../state/store'
 import { useBuilder } from '../state/store'
 import { useCanvasUI } from '../state/canvasUI'
 import { mkFreeEl, pushSnap, FCOLORS } from './model'
+import { overlayOpen } from '../ui/overlay'
 import NoteBlocks from '../builder/NoteBlocks'
 import { coveredSet, mergeCovering } from './tableOps'
 import ColorPicker from '../builder/chrome/ColorPicker'
@@ -160,6 +162,8 @@ export default function FreeLayer({ page, W, H, interactive }: Props) {
   useEffect(() => {
     if (!interactive) return
     const onKey = (e: KeyboardEvent) => {
+      // **위가 덮여 있으면 아래는 키를 안 건드린다**(EVER-SKETCH1 bab224b · ui/overlay 참고).
+      if (overlayOpen()) return
       if (e.key === 'Escape') { setSel(null); setConnSrc(null); setSelConn(null); endEditing(); setMarquee(null); setTool('select'); return }
       if (e.key === 'Delete' || e.key === 'Backspace') {
         const st = connKeyRef.current
@@ -243,6 +247,10 @@ export default function FreeLayer({ page, W, H, interactive }: Props) {
   useEffect(() => {
     if (!active || editing != null || tool !== 'select' || !tableSel) return
     const onKey = (e: KeyboardEvent) => {
+      // **여기가 발표 Esc 를 먹던 자리다**(EVER-SKETCH1 bab224b). 이 리스너는 window 의 capture 라
+      // 제일 먼저 불리고, Escape 를 「고른 칸 풀기」로 삼아 stopPropagation 한다.
+      // 위에 전체 화면이 덮여 있으면 그 키는 애초에 내 것이 아니다.
+      if (overlayOpen()) return
       const t = e.target as HTMLElement | null
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
       if (e.metaKey || e.ctrlKey || e.altKey) return
@@ -678,7 +686,16 @@ export default function FreeLayer({ page, W, H, interactive }: Props) {
             onPointerDown={active ? (e) => onElDown(e, el) : undefined}
             onPointerEnter={active && tool === 'select' ? () => setHoverId(el.id) : undefined}
             onPointerLeave={active && tool === 'select' ? () => setHoverId((h) => (h === el.id ? null : h)) : undefined}
-            onDoubleClick={active ? (e) => { if (isImg) pickImage(el); else startEditing(el.id, { x: e.clientX, y: e.clientY }) } : undefined}>
+            onDoubleClick={active ? (e) => {
+              if (isImg) { pickImage(el); return }
+              // **이미 편집 중인데 글자 칸 바깥(도형 안쪽 여백)을 더블클릭한 경우.** 그대로
+              // startEditing 으로 흘리면 좌표만 적어 두고 아무 일도 안 해서, 브라우저가 고른
+              // 마지막 낱말이 남는다. 글자 칸 안을 누른 것과 같은 규칙(낱말 아니면 커서)으로 맞춘다.
+              if (editing === el.id && editRef.current?.node) {
+                selectWordOrCaretAtPoint(editRef.current.node, e.clientX, e.clientY); return
+              }
+              startEditing(el.id, { x: e.clientX, y: e.clientY })
+            } : undefined}>
             {isNote
               ? (<div className="note-inner" style={{ pointerEvents: editingThis ? 'auto' : 'none' }}
                   onPointerDown={editingThis ? (e) => e.stopPropagation() : undefined}
@@ -777,14 +794,33 @@ export default function FreeLayer({ page, W, H, interactive }: Props) {
                         n.focus()
                       }}
                       onFocus={(e) => { const n = e.currentTarget; requestAnimationFrame(() => {
-                        const sel = window.getSelection(); if (!sel || !sel.isCollapsed) return
+                        const sel = window.getSelection(); if (!sel) return
                         const at = editAtRef.current; editAtRef.current = null
-                        const cr = at && (document as any).caretRangeFromPoint ? (document as any).caretRangeFromPoint(at.x, at.y) as Range | null : null
-                        const r = document.createRange()
-                        if (cr && n.contains(cr.startContainer)) { r.setStart(cr.startContainer, cr.startOffset); r.collapse(true) }
-                        else r.selectNodeContents(n)   // 좌표를 못 얻으면 예전처럼 전체 선택
+                        // **더블클릭으로 켰으면 우리 규칙이 이긴다**(띄어쓰기 기준 낱말, 빈 곳이면 커서).
+                        // (EVER-SKETCH1 lib/wordSelect · 2026-09-21)
+                        //
+                        // 전에는 맨 앞에서 「이미 뭔가 골라져 있으면 손대지 않는다」로 빠져나갔다.
+                        // 그런데 두 번째 누름에서 **브라우저가 먼저** 편집 전 글자의 낱말을 골라 두므로
+                        // 거의 늘 여기서 빠져나갔고, 결과는 우리 규칙이 아니라 브라우저 규칙이었다.
+                        if (at) { selectWordOrCaretAtPoint(n, at.x, at.y); return }
+                        // 좌표 없이 켜진 경우(새 글상자를 놓자마자 등)는 예전처럼 전체 선택 —
+                        // 다른 길이 이미 골라 둔 것이 있으면 존중한다.
+                        if (!sel.isCollapsed) return
+                        const r = document.createRange(); r.selectNodeContents(n)
                         sel.removeAllRanges(); sel.addRange(r)
                       }) }}
+                      // **편집 중인 글자 위의 누름은 글자의 것이다.**
+                      // 여기서 멈추지 않으면 바깥 `.fel` 의 onElDown 까지 올라가 preventDefault 하고
+                      // **도형 끌기**를 시작한다. 그러면 편집 중에 글자를 끌어 고르면 글자 대신 도형이
+                      // 움직이고, 세 번 눌러 전체 고르기도 먹지 않는다. 메모(note-inner)는 이미 이렇게 막고 있었다.
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onDoubleClick={(e) => {
+                        // 편집 중 더블클릭도 **같은 기준**으로. 브라우저 기본(ICU 낱말)에 맡기면
+                        // 「성번02_.」 가 쪼개진다. 바깥(.fel)의 더블클릭까지 올라가면
+                        // startEditing 이 좌표를 다시 적어 두어, 다음 편집이 엉뚱한 자리를 고른다.
+                        e.stopPropagation()
+                        selectWordOrCaretAtPoint(e.currentTarget, e.clientX, e.clientY)
+                      }}
                       onBlur={() => { endEditing() }}>{el.text}</div>
                   : <div className="feltext" style={txtStyle}>{el.text}</div>)}
             {active && isNote && editingThis ? <div className="note-drag" title="드래그해서 이동">⠿</div> : null}

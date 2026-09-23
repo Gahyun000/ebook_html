@@ -122,6 +122,10 @@
 .axth-list{display:flex;flex-direction:column;gap:10px;padding:6px 10px 12px;flex:1 1 auto;min-height:0;overflow:auto}
 .axth{display:flex;gap:8px;align-items:flex-start;cursor:pointer;border-radius:8px;padding:3px}
 .axth:hover{background:var(--ax-plane)}
+/* **키보드로 들어왔을 때 어디에 서 있는지.** 고른 표시(파란 테두리)와 초점은 다른 것이다.
+   마우스로 누를 때는 안 뜬다(:focus-visible). (EVER-SKETCH1 1219bbd) */
+.axth:focus{outline:none}
+.axth:focus-visible{background:var(--ax-plane);box-shadow:0 0 0 2px rgba(42,120,214,.55)}
 .axth-no{font-size:11px;color:var(--ax-muted);width:14px;text-align:right;padding-top:16px;font-variant-numeric:tabular-nums;flex:0 0 auto}
 .axth-mini{position:relative;border:1px solid var(--ax-line);border-radius:6px;overflow:hidden;background:#fff;flex:0 0 auto}
 .axth.on .axth-mini{outline:2px solid var(--ax-blue);border-color:var(--ax-blue)}
@@ -153,6 +157,15 @@
 .ax-resize:hover{background:rgba(36,98,235,.28)}
 .ax-edge{position:absolute;top:50%;transform:translateY(-50%);z-index:6;width:18px;height:46px;border:1px solid var(--ax-line);background:#fff;border-radius:9px;cursor:pointer;font-size:13px;color:var(--ax-muted);display:grid;place-items:center;box-shadow:0 2px 8px rgba(0,0,0,.10);padding:0}
 .ax-edge.l{left:6px}.ax-edge.r{right:6px}
+/* 접혀 있을 때는 **이름이 붙은 탭**이 된다(EVER-SKETCH1 31b27ae).
+   창이 좁아지면 이 패널들이 저절로 접히므로, 빈 가장자리에 화살표만 남기면
+   「쪽 목록이 어디 갔지」로 끝난다. 무엇이 접혔는지 말해 주고 누르면 돌아온다. */
+.ax-edge.named{width:22px;height:auto;padding:9px 0;gap:5px;grid-auto-flow:row;
+  border-color:var(--ax-blue);color:var(--ax-blue);background:#fff;
+  box-shadow:0 2px 10px rgba(42,120,214,.22)}
+.ax-edge.named em{writing-mode:vertical-rl;font-style:normal;font-size:11px;
+  font-weight:800;letter-spacing:.06em;line-height:1}
+.ax-edge.named:hover{background:var(--ax-blue-100)}
 .ax-edge:hover{color:var(--ax-blue);border-color:var(--ax-blue)}
 .ax-stage-wrap .stage{flex:1 1 auto;min-height:0;overflow:auto;display:flex;align-items:flex-start;justify-content:center;padding:16px}
 .ax-panelcol{display:grid;grid-template-columns:1fr 52px;background:var(--ax-surface);border-left:1px solid var(--ax-line);min-height:0}

@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import { cardByKey } from '../cards/registry'
 import type { ImportedDoc } from '../import/htmlImport'
 import { polish } from '../builder/polish'
-import { dropHistory } from '../canvas/history'
+import { dropHistory, popDocRedo, popDocSnap, pushDocRedo, pushDocSnap, pushDocUndoRaw } from '../canvas/history'
 import type { ThemeName } from '../design/tokens'
 export type Orientation = 'portrait' | 'landscape'
 export type SizePreset = 's' | 'm' | 'l'
@@ -13,7 +13,7 @@ export interface BookPlan { title?: string; orientation?: Orientation; theme?: T
 // G5 — 부분 수정: 대상 페이지 필드만 덮어쓰기(edits) + 새 장 끝에 추가(adds).
 export interface PageEdit { pageId: number; fields: Record<string, string> }
 export interface PageAdd { cardKey: string; fields?: Record<string, string> }
-export interface FreeEl { id: number; type: string; x: number; y: number; w: number; h: number; text: string; color: string; fs: number; src?: string; bold?: boolean; tcolor?: string; rows?: number; cols?: number; cells?: string[][]; merges?: { r: number; c: number; rs: number; cs: number }[]; calign?: Record<string, 'left' | 'center' | 'right'>; cvalign?: Record<string, 'top' | 'middle' | 'bottom'>; cfs?: Record<string, number>; headRow?: boolean; wa?: boolean; italic?: boolean; underline?: boolean; rot?: number; align?: 'left' | 'center' | 'right'; gotoSeq?: number; blocks?: Block[]; flipH?: boolean; flipV?: boolean; opacity?: number; shadow?: boolean; reflect?: boolean; locked?: boolean; groupId?: number; borderColor?: string; borderWidth?: number }
+export interface FreeEl { id: number; type: string; x: number; y: number; w: number; h: number; text: string; color: string; fs: number; src?: string; bold?: boolean; tcolor?: string; rows?: number; cols?: number; cells?: string[][]; colw?: number[]; rowh?: number[]; merges?: { r: number; c: number; rs: number; cs: number }[]; calign?: Record<string, 'left' | 'center' | 'right'>; cvalign?: Record<string, 'top' | 'middle' | 'bottom'>; cfs?: Record<string, number>; cbg?: Record<string, string>; headRow?: boolean; wa?: boolean; italic?: boolean; underline?: boolean; rot?: number; align?: 'left' | 'center' | 'right'; gotoSeq?: number; blocks?: Block[]; flipH?: boolean; flipV?: boolean; opacity?: number; shadow?: boolean; reflect?: boolean; locked?: boolean; groupId?: number; borderColor?: string; borderWidth?: number; /** 테두리 선 모양. 없으면 실선. */ borderDash?: 'solid' | 'dashed' | 'dotted' }
 export interface Conn { from: number; to: number; bend?: { x: number; y: number }; kind?: 'straight' | 'ortho' | 'curve'; arrow?: 'end' | 'both' | 'none'; color?: string; width?: number; dash?: boolean }
 export interface Stroke { points: [number, number][]; color: string; w: number; hl?: boolean }
 export type BlockType = 'h1' | 'h2' | 'h3' | 'h4' | 'text' | 'bullet' | 'numbered' | 'todo' | 'divider' | 'toggle' | 'callout'
@@ -36,6 +36,11 @@ export interface BuilderState {
   selectPage: (pageId: number) => void
   setTitle: (t: string) => void
   setOrientation: (o: Orientation) => void
+  /** 쪽 목록이 바뀌기 직전을 기억한다(쪽 추가·삭제·순서). */
+  snapDoc: () => void
+  /** 문서 단위 되돌리기 / 다시하기 — 쪽이 생기고 없어진 일이 여기로 돌아온다. */
+  undoDoc: () => void
+  redoDoc: () => void
   setFont: (f: string) => void
   setSize: (s: SizePreset) => void
   setTheme: (t: ThemeName) => void
@@ -143,10 +148,20 @@ export function reseedUids(pages: Page[]): void {
   }
 }
 
+/** 문서 단위 되돌리기가 기억하는 **한 문서의 모습**.
+ *  쪽 안의 이력(canvas/history.ts 의 쪽별 스택)과 달리 쪽 목록 자체를 통째로 든다. */
+function docSnap(pages: Page[], selectedPageId: number | null): string {
+  return JSON.stringify({ pages, selectedPageId })
+}
+
 export const useBuilder = create<BuilderState>((set, get) => ({
   title: '유니에버 AX 사업모델', orientation: 'portrait', font: 'auto', size: 'm', theme: 'light',
   pages: [], selectedPageId: null,
-  addCard: (cardKey) => set((s) => {
+  // 쪽이 **생기고·없어지고·자리를 바꾸는** 길에는 모두 문서 이력을 남긴다(EVER-SKETCH1 9eabded).
+  // 쪽별 이력(canvas/history.ts)으로는 쪽 자체를 되돌릴 수 없어 ⌘Z 가 죽어 보였다.
+  addCard: (cardKey) => {
+    const g = get(); pushDocSnap(docSnap(g.pages, g.selectedPageId))
+    return set((s) => {
     // 슬라이드 = 빈 캔버스 편집 페이지(구글 슬라이드식). 블록편집기 없이 요소로 직접 편집.
     if (cardKey === 'slide') {
       const sp: Page = { id: uid++, cardKey: 'slide', fields: {}, free: true, els: [], conns: [], strokes: [], blocks: [], bg: '' }
@@ -162,10 +177,15 @@ export const useBuilder = create<BuilderState>((set, get) => ({
       ]
       p.bg = ''
     }
-    return { pages: [...s.pages, p], selectedPageId: p.id }
-  }),
+      return { pages: [...s.pages, p], selectedPageId: p.id }
+    })
+  },
   updateField: (pageId, key, value) => set((s) => ({ pages: mapPage(s.pages, pageId, (p) => ({ ...p, fields: { ...p.fields, [key]: value } })) })),
   removePage: (pageId) => set((s) => {
+    if (!s.pages.some((p) => p.id === pageId)) return {} as Partial<BuilderState>
+    // **지우기 전을 기억한다.** 지운 쪽의 쪽별 이력은 아래 dropHistory 로 사라지지만,
+    // 쪽이 통째로 돌아오는 것은 문서 이력이 맡는다.
+    pushDocSnap(docSnap(s.pages, s.selectedPageId))
     dropHistory(pageId)
     const at = s.pages.findIndex((p) => p.id === pageId)
     const pages = s.pages.filter((p) => p.id !== pageId)
@@ -177,7 +197,7 @@ export const useBuilder = create<BuilderState>((set, get) => ({
     }
     return { pages, selectedPageId: sel }
   }),
-  movePage: (pageId, dir) => set((s) => { const i = s.pages.findIndex((p) => p.id === pageId); const j = i + dir; if (i < 0 || j < 0 || j >= s.pages.length) return {} as Partial<BuilderState>; const pages = [...s.pages]; const tmp = pages[i]; pages[i] = pages[j]; pages[j] = tmp; return { pages } }),
+  movePage: (pageId, dir) => set((s) => { const i = s.pages.findIndex((p) => p.id === pageId); const j = i + dir; if (i < 0 || j < 0 || j >= s.pages.length) return {} as Partial<BuilderState>; pushDocSnap(docSnap(s.pages, s.selectedPageId)); const pages = [...s.pages]; const tmp = pages[i]; pages[i] = pages[j]; pages[j] = tmp; return { pages } }),
   // movePage 는 인접 스왑이라 임의 위치 이동을 표현할 수 없다(28→3 이면 25번 눌러야 한다).
   // 드래그 재정렬은 잘라내서 끼워 넣는 방식이어야 중간 페이지들의 상대 순서가 유지된다.
   reorderPage: (from, to) => set((s) => {
@@ -185,6 +205,7 @@ export const useBuilder = create<BuilderState>((set, get) => ({
     if (from < 0 || from >= n) return {} as Partial<BuilderState>
     const dest = Math.max(0, Math.min(n - 1, to))
     if (dest === from) return {} as Partial<BuilderState>
+    pushDocSnap(docSnap(s.pages, s.selectedPageId))
     const pages = [...s.pages]
     const [moved] = pages.splice(from, 1)
     pages.splice(dest, 0, moved)
@@ -192,6 +213,7 @@ export const useBuilder = create<BuilderState>((set, get) => ({
   }),
   duplicatePage: (pageId) => set((s) => {
     const i = s.pages.findIndex((p) => p.id === pageId); if (i < 0) return {} as Partial<BuilderState>
+    pushDocSnap(docSnap(s.pages, s.selectedPageId))
     const src = s.pages[i]
     const copy = clonePageWithNewIds(src)
     const pages = [...s.pages]; pages.splice(i + 1, 0, copy)
@@ -200,6 +222,20 @@ export const useBuilder = create<BuilderState>((set, get) => ({
   selectPage: (pageId) => set({ selectedPageId: pageId }),
   setTitle: (t) => set({ title: t }),
   setOrientation: (o) => set({ orientation: o }),
+  /** 쪽이 생기고·없어지고·자리를 바꾸기 **직전**의 문서를 기억한다. */
+  snapDoc: () => { const s = get(); pushDocSnap(docSnap(s.pages, s.selectedPageId)) },
+  undoDoc: () => set((s) => {
+    const back = popDocSnap()
+    if (back == null) return {} as Partial<BuilderState>
+    pushDocRedo(docSnap(s.pages, s.selectedPageId))
+    return JSON.parse(back) as Partial<BuilderState>
+  }),
+  redoDoc: () => set((s) => {
+    const fwd = popDocRedo()
+    if (fwd == null) return {} as Partial<BuilderState>
+    pushDocUndoRaw(docSnap(s.pages, s.selectedPageId))
+    return JSON.parse(fwd) as Partial<BuilderState>
+  }),
   setFont: (fv) => set({ font: fv }),
   setSize: (sz) => set({ size: sz }),
   setTheme: (t) => set({ theme: t }),

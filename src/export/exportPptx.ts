@@ -1,7 +1,8 @@
 import PptxGenJS from 'pptxgenjs'
 import type { Page, FreeEl } from '../state/store'
 import { saveWithPicker } from './exportFiles'
-import { coveredSet, mergeCovering } from '../canvas/tableOps'
+import { coveredSet, mergeCovering, trackSizes } from '../canvas/tableOps'
+import { cellBackground, cellTextColor } from '../canvas/cellColor'
 
 const PXIN = 96  // px per inch(기준)
 
@@ -152,6 +153,7 @@ export async function exportPptx(pages: Page[], opts: { title: string; W: number
         const R = el.rows || 2, C = el.cols || 2
         const cov = coveredSet(el.merges)
         const head = el.headRow !== false
+        const headRows = head ? 1 : 0
         const rows: any[] = []
         for (let r = 0; r < R; r++) {
           const row: any[] = []
@@ -162,12 +164,38 @@ export async function exportPptx(pages: Page[], opts: { title: string; W: number
             const cf = el.cfs && el.cfs[r + '_' + c]
             if (cf) o.fontSize = Math.max(6, cf * 0.72)   // 표 전체 fontSize 를 셀 단위로 덮어쓴다
             if (m) { o.colspan = m.cs; o.rowspan = m.rs }
-            if (head && r === 0) { o.bold = true; o.fill = { color: 'F2F5FA' } }
+            // ── 칸 색 (EVER-SKETCH1 5c0e409) ──
+            //
+            // 여기서 `el.cbg` 를 **아예 안 읽고 있었다.** 그래서 내려받은 PPT 에서는
+            // 칸 색이 전부 사라지고 머리글까지 회색이 됐다.
+            //
+            // 규칙은 화면과 **같은 함수**에서 온다(cellColor.cellBackground·cellTextColor).
+            // 여기서 따로 판단하면 화면과 내려받은 것이 어긋난다 — 그게 이 버그의 본체다.
+            const key = r + '_' + c
+            const cbg = el.cbg && el.cbg[key]
+            const hx = rgbToHex(cellBackground(cbg))
+            if (hx) o.fill = { color: hx }
+            const tc = rgbToHex(cellTextColor(cbg))
+            if (tc) o.color = tc
+            if (r < headRows) {
+              o.bold = true
+              // 색이 있으면 그 색이 이긴다. 예전에는 F2F5FA 를 **무조건** 덮어써서
+              // 칠해 둔 머리글이 회색으로 바뀌었다.
+              if (!hx) o.fill = { color: 'F2F5FA' }
+            }
             row.push({ text: (el.cells && el.cells[r] && el.cells[r][c]) || '', options: o })
           }
           rows.push(row)
         }
-        if (rows.length) slide.addTable(rows, { ...box, fontSize: Math.max(6, (el.fs || 12) * 0.72), border: { type: 'solid', color: rgbToHex(el.borderColor) || 'CFD5E2', pt: el.borderWidth || 0.5 }, autoPage: false } as any)
+        // ── 열 너비·행 높이 ──
+        // 안 넘기면 파워포인트가 **전부 똑같이** 나눈다.
+        const cw = trackSizes(el.colw, C), rh = trackSizes(el.rowh, R)
+        const sc = cw.reduce((a, b) => a + b, 0), sr = rh.reduce((a, b) => a + b, 0)
+        const colW = cw.map((v) => (box.w * v) / sc)
+        const rowH = rh.map((v) => (box.h * v) / sr)
+        // 테두리 선 모양. 파워포인트 표는 실선·파선·없음 셋뿐이라 점선도 파선으로 간다.
+        const bt = (el.borderWidth === 0) ? 'none' : (el.borderDash && el.borderDash !== 'solid') ? 'dash' : 'solid'
+        if (rows.length) slide.addTable(rows, { ...box, colW, rowH, fontSize: Math.max(6, (el.fs || 12) * 0.72), border: { type: bt, color: rgbToHex(el.borderColor) || 'CFD5E2', pt: el.borderWidth || 0.5 }, autoPage: false } as any)
         continue
       }
       if (el.type === 'note') {
@@ -186,9 +214,25 @@ export async function exportPptx(pages: Page[], opts: { title: string; W: number
       const fill = rgbToHex(el.color)
       const opts: any = { ...box, ...common, shape: st, align: el.align || 'center', valign: 'middle', fontSize: Math.max(6, (el.fs || 12) * 0.72), color: rgbToHex(el.tcolor) || '333333', bold: !!el.bold }
       opts.fill = fill ? { color: fill } : { type: 'none' }
+      // 반투명. 화면은 0~1, 파워포인트는 「몇 % 비침」이라 뒤집어 넣는다.
+      if (el.opacity != null && el.opacity < 1 && opts.fill.color) {
+        opts.fill.transparency = Math.round((1 - el.opacity) * 100)
+      }
       const bc = rgbToHex(el.borderColor)
       if (bc && (el.borderWidth == null || el.borderWidth > 0)) opts.line = { color: bc, width: el.borderWidth || 1 }
       else if (el.type === 'box' || el.type === 'round' || el.type === 'sticky') opts.line = { color: 'CFD5E2', width: 1 }
+      // 선 모양(실선·파선·점선). 점선은 `sysDot`, 파선은 `dash` 가 화면과 제일 가깝다.
+      if (opts.line && el.borderDash && el.borderDash !== 'solid') {
+        opts.line.dashType = el.borderDash === 'dotted' ? 'sysDot' : 'dash'
+      }
+      // 그림자. 화면은 drop-shadow(0 3px 7px rgba(0,0,0,.32)) 하나뿐이라 그 값을 옮긴다
+      // (각 90도 = 아래쪽, 거리 3px ≈ 2.25pt, 번짐 7px ≈ 5pt).
+      if (el.shadow) opts.shadow = { type: 'outer', color: '000000', opacity: 0.32, angle: 90, offset: 2.25, blur: 5 }
+      // 반투명은 **테두리에도** 걸어야 한다. 채우기에만 걸면 테두리만 진하게 남아
+      // 딴 도형처럼 보인다. 글자는 파워포인트가 비치게 못 해서 그대로 남는다.
+      if (el.opacity != null && el.opacity < 1 && opts.line && opts.line.color) {
+        opts.line.transparency = Math.round((1 - el.opacity) * 100)
+      }
       if (el.underline) opts.underline = { style: 'sng' }
       slide.addText(el.text || '', opts)
     }

@@ -1,4 +1,5 @@
 import { useCanvasUI } from '../../state/canvasUI'
+import { useKey } from '../../ui/keyLabel'
 import type { Tool } from '../../state/canvasUI'
 import { useSelEl } from '../useSelEl'
 import ColorPicker from './ColorPicker'
@@ -89,6 +90,7 @@ function ShapeTool() {
 }
 
 export default function EditToolbar() {
+  const K = useKey()
   const tool = useCanvasUI((s) => s.tool)
   const setTool = useCanvasUI((s) => s.setTool)
   const penWidth = useCanvasUI((s) => s.penWidth)
@@ -133,8 +135,8 @@ export default function EditToolbar() {
     { t: 'table', icon: '▦', title: '표' },
     { t: 'wordart', icon: '🅰', title: '글맵시' },
   ]
-  const size = el ? el.fs : 30
-  function setSize(v: number) { if (el) patch({ fs: Math.max(6, Math.min(120, v)) }) }
+  // (여기 있던 size/setSize 는 아무도 안 쓰는 죽은 코드였다(EVER-SKETCH1 3b4846c) —
+  //  남겨 두면 누가 다시 연결하면서 「한 글자마다 깎는」 그 버그를 되살린다.)
   function cycleColor() {
     if (!el) return
     const i = TEXT_COLORS.indexOf(el.tcolor || '#1a1a1a')
@@ -143,8 +145,8 @@ export default function EditToolbar() {
 
   return (
     <div className="ax-tb">
-      <button className="ib" title="실행취소 (⌘/Ctrl+Z)" onClick={() => emit('ebook:undo')}>↺</button>
-      <button className="ib" title="다시실행 (⌘/Ctrl+Shift+Z)" onClick={() => emit('ebook:redo')}>↻</button>
+      <button className="ib" title={`실행취소 (${K('mod+Z')})`} onClick={() => emit('ebook:undo')}>↺</button>
+      <button className="ib" title={`다시실행 (${K('mod+shift+Z')})`} onClick={() => emit('ebook:redo')}>↻</button>
       <button className={'ib save-tb state-' + saveStatus + (flash ? ' flash' : '')} title={saveTitle} aria-label="지금 저장" onClick={doSave}>
         <svg className="save-ic" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V7l-4-4zm-5 16c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3zm3-10H5V5h10v4z"/></svg>
       </button>

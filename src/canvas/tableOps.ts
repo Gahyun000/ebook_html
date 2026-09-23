@@ -148,3 +148,10 @@ export function setCellFsRange(el: FreeEl, r0: number, c0: number, r1: number, c
   }
   return { cfs }
 }
+
+// 열 너비·행 높이 비율 배열을 **숫자 배열**로 편다(EVER-SKETCH1 tableOps.trackSizes).
+// 길이가 맞지 않거나 이상한 값이 섞이면 균등(전부 1)으로 되돌린다.
+export function trackSizes(arr: number[] | undefined, n: number): number[] {
+  const ok = !!arr && arr.length === n && arr.every((v) => typeof v === 'number' && v > 0 && isFinite(v))
+  return ok ? (arr as number[]).slice() : Array.from({ length: n }, () => 1)
+}

@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { useBuilder } from '../../state/store'
 import { useProjects } from '../../persistence/projects'
 import { useCanvasUI } from '../../state/canvasUI'
+import { useKey } from '../../ui/keyLabel'
 import { useAutosave } from '../../persistence/autosave'
 import type { Tool } from '../../state/canvasUI'
 
@@ -28,29 +29,32 @@ export default function MenuBar({ onHelp, onTutorial, onSettings, onImport, onPr
   }, [])
 
   const emit = (n: string) => window.dispatchEvent(new CustomEvent(n))
+  // 단축키 글자는 **보는 사람 키보드에 있는 것**으로 적는다(ui/keyLabel · EVER-SKETCH1 d41f51f).
+  // 「＋ 새 슬라이드」의 ⌘M 표기는 뺐다 — 받는 곳이 아예 없었다.
+  const K = useKey()
   const tool = (t: Tool) => setTool(t)
   const curBg = (d: boolean) => { if (selId != null) setPageBg(selId, d ? '#0e1c30' : '') }
 
   const MENUS: Menu[] = [
     { label: '파일', items: [
-      { label: '📄 HTML 가져오기', sc: 'Alt+O', run: onImport },
+      { label: '📄 HTML 가져오기', sc: K('alt+O'), run: onImport },
       { sep: true },
-      { label: '💾 저장', sc: '⌘S', run: () => { void saveNow() } },
+      { label: '💾 저장', sc: K('mod+S'), run: () => { void saveNow() } },
       { sep: true },
       { label: '🖼 PDF로 내보내기 (이미지)', run: () => emit('ebook:export-pdf') },
       { label: '📊 PPT로 내보내기 (편집 가능)', run: () => emit('ebook:export-pptx') },
-      { label: '↧ 이북(웹) 만들기', sc: '⌘↵', run: () => emit('ebook:build') },
+      { label: '↧ 이북(웹) 만들기', sc: K('mod+enter'), run: () => emit('ebook:build') },
       { sep: true },
       { label: '▷ 슬라이드쇼 (미리 보기)', run: onPresent },
       { sep: true },
       { label: '⚙ 환경설정', run: onSettings },
     ] },
     { label: '수정', items: [
-      { label: '실행취소', sc: '⌘Z', run: () => emit('ebook:undo') },
-      { label: '재실행', sc: '⌘Y', run: () => emit('ebook:redo') },
+      { label: '실행취소', sc: K('mod+Z'), run: () => emit('ebook:undo') },
+      { label: '재실행', sc: K('mod+Y'), run: () => emit('ebook:redo') },
       { sep: true },
-      { label: '선택 요소 복제', sc: '⌘D', run: () => emit('ebook:dup') },
-      { label: '선택 요소 삭제', sc: 'Del', run: () => emit('ebook:del') },
+      { label: '선택 요소 복제', sc: K('mod+D'), run: () => emit('ebook:dup') },
+      { label: '선택 요소 삭제', sc: K('del'), run: () => emit('ebook:del') },
     ] },
     { label: '보기', items: [
       { label: '▶ 예시영상', run: () => emit('ebook:demo') },
@@ -64,7 +68,7 @@ export default function MenuBar({ onHelp, onTutorial, onSettings, onImport, onPr
       { label: '╱  선', run: () => tool('pen') },
       { label: '🅰  Word Art (글맵시)', run: () => tool('wordart') },
       { sep: true },
-      { label: '＋ 새 슬라이드', sc: '⌘M', run: () => addCard('slide') },
+      { label: '＋ 새 슬라이드', run: () => addCard('slide') },
       { label: '＋ 덱 섹션 카드', run: () => addCard('dsection') },
     ] },
     { label: '서식', items: [
@@ -78,7 +82,7 @@ export default function MenuBar({ onHelp, onTutorial, onSettings, onImport, onPr
     { label: '슬라이드', items: [
       { label: '▷ 슬라이드쇼', run: onPresent },
       { sep: true },
-      { label: '＋ 새 슬라이드', sc: '⌘M', run: () => addCard('slide') },
+      { label: '＋ 새 슬라이드', run: () => addCard('slide') },
       { label: '＋ 덱 섹션 카드', run: () => addCard('dsection') },
       { label: '⧉ 슬라이드 복제', run: () => { if (selId != null) duplicatePage(selId) } },
       { label: '🗑 슬라이드 삭제', run: () => { if (selId != null) removePage(selId) } },

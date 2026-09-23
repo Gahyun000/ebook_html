@@ -42,4 +42,6 @@ export const FCOLORS = ['#eaf0ff', '#dceeb1', '#f4d2c1', '#e7e3fb', '#cdeacf', '
 export {
   pushSnap, popSnap, pushUndoRaw, pushRedo, popRedo,
   canUndo, canRedo, resetHistory, dropHistory,
+  // 문서 단위(쪽이 생기고·없어지고·자리를 바꾸는 일) — 2026-09-16.
+  nextUndoKind, nextRedoKind,
 } from './history'
