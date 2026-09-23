@@ -365,7 +365,8 @@ STAGES.push(['3단계 · 표 편집 · 한글 입력', async () => {
 
   // ④ 병합 칸에 닿으면 범위가 커진다 · 머리 띠
   await drag(await center(cell(0, 0)), await center(cell(1, 0)))
-  await p.locator('.insp-pill', { hasText: '⤢ 병합' }).first().click(); await p.waitForTimeout(250)
+  // 5단계(3c07f77)부터 병합은 **위 도구줄 한 곳**에 있다 — 패널의 맨 단추 둘은 지웠다.
+  await p.locator('.ax-tbrow.ctx .tbtn', { hasText: '⤢ 병합' }).first().click(); await p.waitForTimeout(250)
   ok('[표3] (0,0)~(1,0) 을 병합했다', (await cell(1, 0).count()) === 0)
   const tbA = await tblFel().boundingBox()
   await drag(await center(cell(0, 1)), await center(cell(0, 0)))
@@ -655,7 +656,154 @@ STAGES.push(['4단계 · 새 페이지 목록 · 감춘 카드', async () => {
   ok('[옛 자료] 덱 섹션 쪽 본문이 그려진다', /옛 덱 섹션 제목/.test(s2) && /찾고 봅니다/.test(s2), s2.slice(0, 80).replace(/\n/g, ' '))
 }])
 
+// ── 5단계 ─────────────────────────────────────────────────
+// 오른쪽 패널: 탭 → 접이식 묶음 + 접힌 줄 요약(22dd552) · 병합은 도구줄 한 곳 · 무엇을 고치는지(3c07f77) ·
+// 일 단위 묶음(93ecb00) · 묶음 부품을 바깥에(2846b9a — 값을 바꿔도 스크롤·포커스 유지) ·
+// ▾ 고르개는 도구줄 밖을 눌러도 닫힌다(도구줄 줄이 container-type 이라 확인해 둔다).
+STAGES.push(['5단계 · 오른쪽 패널 접이식 묶음', async () => {
+  await freshBook()
+  const panel = p.locator('.ax-inspector')
+  const body = panel.locator('.insp-body')
+  const accTexts = async () => (await panel.locator('.insp-acc').allInnerTexts()).map((t) => t.replace(/\s+/g, ' ').replace(/^[▾▸] /, '').trim())
+  const acc = (t) => panel.locator('.insp-acc').filter({ has: p.locator('.t', { hasText: new RegExp('^' + t + '$') }) }).first()
+  const subOf = async (t) => ((await acc(t).locator('.sub').innerText().catch(() => '')) || '').trim()
+  async function openAcc(t) { if ((await acc(t).getAttribute('aria-expanded')) !== 'true') { await acc(t).click(); await p.waitForTimeout(150) } }
+  async function closeAcc(t) { if ((await acc(t).getAttribute('aria-expanded')) === 'true') { await acc(t).click(); await p.waitForTimeout(150) } }
+  const ctxRow = p.locator('.ax-tbrow.ctx')
+  const lb = await layer().boundingBox()
+  const blank = { x: lb.x + lb.width - 12, y: lb.y + lb.height - 12 }
+
+  // ── 도형을 고르면 ──
+  await p.locator('.ib.shp-btn').first().click(); await p.waitForTimeout(150)
+  await p.locator('.shp-pop .shp-cell[title="사각형"]').click(); await p.waitForTimeout(300)
+  ok('[패널] 탭 막대가 없다', (await p.locator('.insp-tabs').count()) === 0)
+  const sa = await accTexts()
+  ok('[패널] 도형은 네 묶음(모양 · 색 · 글자 · 크기 · 자리 · 효과 · 순서)',
+    sa.length === 4 && ['모양 · 색', '글자', '크기 · 자리', '효과 · 순서'].every((t, i) => sa[i].startsWith(t)), JSON.stringify(sa))
+  ok('[패널] 무엇을 골랐는지 맨 위에 적는다', (await panel.locator('.insp-who').innerText()).includes('도형'))
+  ok('[요약] 글자 — 크기를 말한다', /\d+pt/.test(await subOf('글자')), await subOf('글자'))
+  ok('[요약] 크기 · 자리 — 너비×높이를 말한다', /\d+×\d+/.test(await subOf('크기 · 자리')), await subOf('크기 · 자리'))
+  ok('[요약] 모양 · 색 · 효과 · 순서 — 뭐라도 말한다', (await subOf('모양 · 색')).length > 0 && (await subOf('효과 · 순서')).length > 0)
+  ok('[패널] 처음엔 모양 · 색 · 글자가 펴져 있고 크기 · 자리는 접혀 있다',
+    (await acc('모양 · 색').getAttribute('aria-expanded')) === 'true' && (await acc('글자').getAttribute('aria-expanded')) === 'true'
+    && (await acc('크기 · 자리').getAttribute('aria-expanded')) === 'false')
+  // 4단계 도형 칸이 그대로 닿는가
+  const bodyShape = await body.innerText()
+  ok('[4단계 그대로] 도형 채우기 · 테두리 · 선 모양 · 불투명도', /채우기/.test(bodyShape) && /불투명도/.test(bodyShape)
+    && (await body.locator('select[title="선 모양"]').count()) === 1)
+  ok('[4단계 그대로] 글자 정렬은 그림 단추', (await body.locator('.insp-row.seg button svg').count()) >= 3)
+
+  // 값을 바꿔도 패널을 새로 만들지 않는다(2846b9a) — 스크롤 · 포커스 유지
+  await openAcc('크기 · 자리'); await openAcc('효과 · 순서')
+  await p.setViewportSize({ width: 1440, height: 640 }); await p.waitForTimeout(300)
+  const hIn = body.locator('input[aria-label="높이"]')
+  await hIn.scrollIntoViewIfNeeded()
+  await body.evaluate((n) => { n.scrollTop = Math.min(n.scrollHeight - n.clientHeight, n.scrollTop + 40) })
+  await p.waitForTimeout(100)
+  await body.evaluate((n) => { n.querySelector('input[aria-label="높이"]').dataset.mark = 'm5'; n.querySelector('.insp-acc').dataset.mark = 'a5' })
+  const st0 = await body.evaluate((n) => n.scrollTop)
+  const h0 = Number(await hIn.inputValue())
+  await hIn.focus()
+  await p.keyboard.press('ArrowUp'); await p.waitForTimeout(120)
+  await p.keyboard.press('ArrowUp'); await p.waitForTimeout(200)
+  const after = await body.evaluate((n) => ({ st: n.scrollTop, focus: (document.activeElement && document.activeElement.dataset.mark) || '',
+    acc: !!n.querySelector('.insp-acc[data-mark="a5"]') }))
+  const h1 = Number(await hIn.inputValue())
+  ok('[고침 유지] (사전) 패널이 스크롤돼 있다', st0 > 0, String(st0))
+  ok('[고침 유지] 높이 ▲ 두 번이 두 번 다 먹는다', h1 === h0 + 2, `${h0} → ${h1}`)
+  ok('[고침 유지] 값을 바꿔도 스크롤이 제자리다', Math.abs(after.st - st0) < 2, `${st0} → ${after.st}`)
+  ok('[고침 유지] 치던 칸에서 손이 안 떨어진다(같은 입력 칸에 포커스)', after.focus === 'm5', JSON.stringify(after.focus))
+  ok('[고침 유지] 묶음 머리가 새로 만들어지지 않았다', after.acc)
+  // 채우기 색 칩을 눌러도 그대로
+  await body.locator('.insp-chip').nth(3).click(); await p.waitForTimeout(200)
+  const after2 = await body.evaluate((n) => ({ st: n.scrollTop, acc: !!n.querySelector('.insp-acc[data-mark="a5"]'), inp: !!n.querySelector('input[data-mark="m5"]') }))
+  ok('[고침 유지] 채우기를 바꿔도 묶음 · 입력 칸이 그대로다', after2.acc && after2.inp, JSON.stringify(after2))
+  await p.setViewportSize({ width: 1440, height: 900 }); await p.waitForTimeout(250)
+  // 글자 크기(NumInput) 도 같은 길
+  const fsIn = body.locator('input[aria-label="글자 크기"]')
+  await fsIn.evaluate((n) => { n.dataset.mark = 'f5' })
+  const fs0 = Number(await fsIn.inputValue())
+  await fsIn.focus(); await p.keyboard.press('ArrowUp'); await p.waitForTimeout(150); await p.keyboard.press('ArrowUp'); await p.waitForTimeout(200)
+  const fsFocus = await p.evaluate(() => (document.activeElement && document.activeElement.dataset.mark) || '')
+  const fs1 = Number(await fsIn.inputValue())
+  ok('[고침 유지] 글자 크기 ▲ 두 번 — 포커스가 남고 두 번 다 먹는다', fsFocus === 'f5' && fs1 === fs0 + 2, `${fs0} → ${fs1} · ${fsFocus}`)
+  await p.evaluate(() => { const a = document.activeElement; if (a && a.blur) a.blur() })
+  if (SHOT_DIR) await panel.screenshot({ path: SHOT_DIR + '/stage5_panel_shape.png' })
+
+  // ▾ 고르개 — 도구줄 **밖**을 눌러도 닫힌다
+  await ctxRow.locator('.ax-grp[title="채우기"] .cp-caret').click(); await p.waitForTimeout(150)
+  ok('[▾] 고르개가 열렸다', (await p.locator('.ax-tbrow.ctx .cp-pop').count()) === 1)
+  // **진짜 마우스로** 누른다 — locator.click 은 가림막이 가로막으면 누르지 않고 기다린다.
+  const whoBox = await panel.locator('.insp-who').boundingBox()
+  await p.mouse.click(whoBox.x + whoBox.width / 2, whoBox.y + whoBox.height / 2); await p.waitForTimeout(150)
+  ok('[▾] 도구줄 밖(오른쪽 패널)을 누르면 닫힌다', (await p.locator('.ax-tbrow.ctx .cp-pop').count()) === 0)
+  await ctxRow.locator('.ax-grp[title="테두리"] .cp-caret').click(); await p.waitForTimeout(150)
+  const tbb = await p.locator('.ax-tb').boundingBox()
+  await p.mouse.click(tbb.x + 4, tbb.y + tbb.height + 30); await p.waitForTimeout(150)
+  ok('[▾] 도구줄 밖(작업창)을 누르면 닫힌다', (await p.locator('.ax-tbrow.ctx .cp-pop').count()) === 0)
+  await ctxRow.locator('.ax-grp[title="채우기"] .cp-caret').click(); await p.waitForTimeout(150)
+  await p.locator('.ax-tbrow.ctx .cp-pop .cp-lab').first().click(); await p.waitForTimeout(120)
+  ok('[▾] 고르개 안을 누르면 안 닫힌다', (await p.locator('.ax-tbrow.ctx .cp-pop').count()) === 1)
+  await p.mouse.click(whoBox.x + whoBox.width / 2, whoBox.y + whoBox.height / 2); await p.waitForTimeout(150)
+  // 확인해 보니 가림막(.cp-back, fixed)은 도구줄의 container-type 에 갇히지 않고 **창 전체**를 덮는다 —
+  // 밖을 누르면 그 가림막이 받아 닫는다. 고칠 것이 없어 코드는 그대로 두고, 이 검사로 지킨다.
+  const backBox = await p.evaluate(() => { const n = document.querySelector('.cp-back'); return n ? n.getBoundingClientRect().toJSON() : null })
+  ok('[▾] (닫힌 뒤) 가림막도 남지 않는다', backBox === null, JSON.stringify(backBox))
+
+  // ── 표를 고르면 ──
+  await p.mouse.click(blank.x, blank.y); await p.waitForTimeout(150)
+  await p.locator('.ib[title="표"]').first().click(); await p.waitForTimeout(300)
+  const tblFel = () => layer().locator('.fel:has(.feltable)').first()
+  const cell = (r, c) => tblFel().locator(`.feltd[data-r="${r}"][data-c="${c}"]`)
+  const ta = await accTexts()
+  const TT = ['칸', '행', '채우기', '표 전체 글자', '크기 · 자리', '테두리 · 머리글']
+  ok('[패널] 표는 여섯 묶음', ta.length === 6 && TT.every((t, i) => ta[i].startsWith(t)), JSON.stringify(ta))
+  ok('[패널] 표를 골랐다고 적는다', (await panel.locator('.insp-who .insp-who-t').innerText()) === '표')
+  ok('[요약] 행 — 몇 행 몇 열인지 말한다', /^\d+행 \d+열$/.test(await subOf('행')), await subOf('행'))
+  ok('[요약] 칸 — 칸을 안 골랐다고 말한다', /칸 안 고름/.test(await subOf('칸')), await subOf('칸'))
+  ok('[병합] 패널에는 병합 단추가 없다', (await body.locator('button', { hasText: '병합' }).count()) === 0)
+  ok('[병합] 위 도구줄에 있다', (await ctxRow.locator('.tbtn', { hasText: '병합' }).count()) >= 1)
+  await openAcc('채우기')
+  ok('[병합] 패널은 그 자리를 알려만 준다', /위 툴바의 표 ⤢ 병합/.test(await body.innerText()))
+  ok('[4단계 그대로] 칸을 안 고르면 채우기가 잠겨 있다', await body.locator('.es-cbg').first().isDisabled())
+  await cell(1, 1).click(); await p.waitForTimeout(200)
+  ok('[요약] 칸을 고르면 그 자리를 말한다', /^2행 2열/.test(await subOf('칸')), await subOf('칸'))
+  await body.locator('.es-cbg').nth(2).click(); await p.waitForTimeout(200)
+  const col = await body.locator('.es-cbg').nth(2).getAttribute('title')
+  ok('[4단계 그대로] 패널 채우기로 칸을 칠한다', (await subOf('채우기')) === '칠함' && !!col, `${await subOf('채우기')} · ${col}`)
+  await openAcc('테두리 · 머리글')
+  const bsel = body.locator('select').filter({ has: p.locator('option', { hasText: '없음' }) })
+  ok('[4단계 그대로] 표 테두리 「없음」 · 선 모양', (await bsel.count()) >= 1 && (await body.locator('select[title="선 모양"]').count()) === 1)
+  ok('[4단계 그대로] 칸 정렬 그림 · 셀 글자 크기 NumInput',
+    (await body.locator('input[aria-label="셀 글자 크기"]').count()) === 1 && (await body.locator('.insp-row.seg button svg').count()) >= 6)
+  // 여러 묶음을 함께 펴 둔다
+  await openAcc('표 전체 글자')
+  const bt = await body.innerText()
+  ok('[패널] 표 전체 글자를 펴도 칸 묶음이 안 접힌다', /활성 셀/.test(bt) && /서식 지우기/.test(bt))
+  // 행 추가도 행 묶음에서
+  const r0 = await tblFel().locator('.feltd[data-c="0"]').count()
+  await body.locator('.insp-pill', { hasText: '↓ 아래 추가' }).click(); await p.waitForTimeout(250)
+  ok('[패널] 행 묶음의 「↓ 아래 추가」', (await tblFel().locator('.feltd[data-c="0"]').count()) === r0 + 1)
+  if (SHOT_DIR) await panel.screenshot({ path: SHOT_DIR + '/stage5_panel_table.png' })
+  // 접은 것은 기억한다 — 다른 것을 골랐다 돌아와도 접힌 채
+  await closeAcc('행')
+  await p.mouse.click(blank.x, blank.y); await p.waitForTimeout(150)
+  await p.locator('.ib.shp-btn').first().click(); await p.waitForTimeout(150)
+  await p.locator('.shp-pop .shp-cell[title="사각형"]').click(); await p.waitForTimeout(250)
+  ok('[기억] (사전) 도형으로 옮겨 갔다', (await panel.locator('.insp-who-t').innerText()) === '도형')
+  // 도형이 표 가운데에 겹쳐 놓이므로 지우고 표로 돌아간다
+  await p.evaluate(() => { const a = document.activeElement; if (a && a.blur) a.blur() })
+  await p.keyboard.press('Delete'); await p.waitForTimeout(200)
+  await cell(0, 0).click(); await p.waitForTimeout(250)
+  ok('[기억] 접어 둔 「행」 은 다시 골라도 접혀 있다', (await acc('행').getAttribute('aria-expanded')) === 'false')
+  ok('[기억] 펴 둔 「테두리 · 머리글」 은 펴져 있다', (await acc('테두리 · 머리글').getAttribute('aria-expanded')) === 'true')
+  await openAcc('행')
+}])
+
+// ONLY=5단계 처럼 주면 그 이름이 든 단계만 돈다(고치는 동안 빨리 돌리려고). 비우면 전부.
+const ONLY = process.env.ONLY || ''
 for (const [name, run] of STAGES) {
+  if (ONLY && !name.includes(ONLY)) continue
   console.log(`\n# ${name}`)
   try { await run() } catch (e) { ok(`${name} 실행 중 예외 없음`, false, String(e && e.message || e)) }
 }

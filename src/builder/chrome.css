@@ -301,10 +301,25 @@
 
 /* ── 우측 인스펙터 (PPT/키노트식: 스타일·텍스트·정렬) ── */
 .ax-inspector{height:100%;min-height:0;display:flex;flex-direction:column;background:var(--ax-surface);border-left:1px solid var(--ax-line);min-width:0}
-.insp-tabs{flex:0 0 auto;display:flex;border-bottom:1px solid var(--ax-line)}
-.insp-tabs button{flex:1;border:0;background:none;padding:10px 4px;font-size:12.5px;font-weight:700;color:var(--ax-muted);cursor:pointer;border-bottom:2px solid transparent}
-.insp-tabs button.on{color:var(--ax-blue-d);border-bottom-color:var(--ax-blue)}
-.insp-tabs button:hover{background:var(--ax-plane)}
+/* 「무엇을 골랐는가」 — 묶음 바로 위(EVER-SKETCH1 3c07f77). 도구가 늘어선 자리라
+   정작 어느 것을 고치는 중인지는 화면 가운데를 봐야 알 수 있었다. */
+.insp-who{flex:0 0 auto;display:flex;align-items:baseline;gap:6px;padding:7px 10px 6px;min-width:0;border-bottom:1px solid var(--ax-line)}
+.insp-who-t{font-size:12px;font-weight:800;color:var(--ax-navy,#0F1B3D);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.insp-who-s{font-size:10.5px;color:#9aa3b2;font-weight:700;white-space:nowrap}
+/* 접이식 묶음 — 탭을 대신한다(EVER-SKETCH1 22dd552). 접힌 줄에 지금 값이 적혀 있으면
+   열지 않아도 읽힌다. 본문의 좌우 여백(14px)을 걷어 내 줄이 패널 폭을 다 쓴다. */
+.insp-acc{display:flex;align-items:center;gap:6px;width:calc(100% + 28px);margin:0 -14px;border:none;background:none;
+  padding:7px 14px;cursor:pointer;font:inherit;text-align:left;
+  border-top:1px solid var(--ax-line);min-height:32px}
+.insp-acc:first-child{border-top:none;margin-top:-14px}
+.insp-acc:hover{background:#f7f9fd}
+.insp-acc.on{background:#f7f9fd}
+.insp-acc .ch{font-size:10px;color:#9aa3b2;width:10px;flex:0 0 10px}
+.insp-acc .t{font-size:12px;font-weight:800;color:var(--ax-navy,#0F1B3D);white-space:nowrap}
+.insp-acc .sub{flex:1;min-width:0;text-align:right;font-size:10.5px;color:#9aa3b2;
+  font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.insp-acc.on + .insp-sec{margin-top:8px}
 .insp-body{flex:1 1 auto;min-height:0;overflow:auto;padding:14px 14px 22px}
 .insp-h{font-size:13px;font-weight:800;color:var(--ax-ink);margin:0 0 8px}
 .insp-sec{font-size:11px;font-weight:800;color:var(--ax-muted);letter-spacing:.02em;margin:14px 2px 6px}

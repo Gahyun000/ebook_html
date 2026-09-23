@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { openSections, rememberOpenSections } from '../../persistence/prefs'
 import NumInput from './NumInput'
 import { useBuilder } from '../../state/store'
 import type { PaperType } from '../../state/store'
@@ -11,7 +12,7 @@ import { PAPER_OPTIONS } from '../../cards/paper'
 import { FCOLORS } from '../../canvas/model'
 import { pushSnap } from '../../canvas/model'
 import type { FreeEl } from '../../state/store'
-import { addRow, delRow, addCol, delCol, mergeRange, unmergeAt, setAlignRange, setVAlignRange, setCellFsRange, setCellBgRange } from '../../canvas/tableOps'
+import { addRow, delRow, addCol, delCol, setAlignRange, setVAlignRange, setCellFsRange, setCellBgRange } from '../../canvas/tableOps'
 import { cellBackground, cellColors } from '../../canvas/cellColor'
 import { ALIGN_LABEL, AlignIcon, VALIGN_LABEL, VAlignIcon } from '../../ui/alignIcons'
 
@@ -25,9 +26,64 @@ const PRESETS: { name: string; color: string; tcolor: string }[] = [
   { name: '파랑', color: '#2a78d6', tcolor: '#ffffff' },
   { name: '초록', color: '#2fa37a', tcolor: '#ffffff' },
 ]
-type Tab = 'style' | 'text' | 'arrange' | 'table'
+/** 묶음 이름은 **할 일**로 짓는다(EVER-SKETCH1 93ecb00 C-3, 사용자 결정 ㄴ).
+ *
+ *  예전에는 옛 탭 이름 그대로였다 — 표 · 스타일 · 텍스트 · 정렬.
+ *  그러면 「크기」를 바꾸려면 **정렬**을 열어야 하고, 표 칸 글자를 키우려면
+ *  「셀 글자 크기」(표)인지 「글자 크기」(텍스트)인지 **먼저 정해야** 했다.
+ *
+ *  `text` 만 옛 이름을 그대로 쓴다 — 뜻이 안 바뀌었다. */
+type Tab = 'cell' | 'row' | 'stage' | 'look' | 'text' | 'geom' | 'extra' | 'border'
+/** 기억할 이름들. 여기 없는 이름은 `openSections` 가 버린다. */
+const SECS: readonly Tab[] = ['cell', 'row', 'stage', 'look', 'text', 'geom', 'extra', 'border']
 
-// 우측 인스펙터 — PPT/키노트식. 요소 선택 시 스타일/텍스트/정렬 3탭, 미선택 시 페이지 설정.
+/**
+ * **접이식 한 묶음**(EVER-SKETCH1 22dd552 · 93ecb00). 열 군데가 같은 모양이라 한 곳으로 모았다.
+ *
+ * ── 왜 **파일 맨 바깥**에 있나 (EVER-SKETCH1 2846b9a) ──────────────
+ *
+ * `RightPanel` **안에** 선언하면 화면을 다시 그릴 때마다 `Acc` 가 **새 부품**이 된다.
+ * 리액트는 「자리는 같은데 부품이 바뀌었다」고 보고 고쳐 그리는 대신 **묶음을 통째로
+ * 버리고 새로 만든다.** 그러면 패널 스크롤이 **맨 위로 튀고**(내용이 잠깐 비어 브라우저가
+ * 0 으로 깎는다), 치던 숫자 칸이 **손에서 떨어진다** — ▲를 두 번 연달아 못 누른다.
+ *
+ * **그래서 부품은 바깥에 두고, 안에서 오는 것은 값으로 받는다.** 값이 바뀌면
+ * 고쳐 그릴 뿐 버리지 않는다. 이 자리에 부품을 다시 선언하면 같은 증상이 돌아온다
+ * (inner_component.test.mjs 가 지킨다).
+ */
+function Acc({ k, t, sub, sec, onToggle, children }: {
+  k: Tab; t: string; sub?: string
+  sec: Record<Tab, boolean>; onToggle: (k: Tab) => void
+  children: React.ReactNode
+}) {
+  const open = sec[k]
+  return (<>
+    <button className={'insp-acc' + (open ? ' on' : '')}
+      onClick={() => onToggle(k)} aria-expanded={open}>
+      <span className="ch">{open ? '▾' : '▸'}</span>
+      <span className="t">{t}</span>
+      {sub ? <span className="sub">{sub}</span> : null}
+    </button>
+    {open ? <>{children}</> : null}
+  </>)
+}
+
+/** 처음 여는 사람에게 **자주 쓰는 것만** 펴 준다(시안 그대로).
+ *  표는 칸·행·채우기, 그 밖은 모양·글자. 나머지는 접힌 줄에 지금 값이 적혀 있어
+ *  열지 않아도 읽힌다 — 그게 접이식으로 바꾼 이유다. */
+const DEFAULT_OPEN: Record<Tab, boolean> = {
+  cell: true, row: true, stage: true, look: true, text: true,
+  geom: false, extra: false, border: false,
+}
+
+/** 고른 것의 이름 — 생김새 이름(3c07f77). 여기 없는 갈래는 「도형」이다.
+ *  (원본은 표준 양식이면 문서 안의 이름표를 읽는다. 이 저장소에는 양식 슬롯이 없다.) */
+const EL_NAME: Record<string, string> = {
+  table: '표', text: '글상자', icon: '아이콘', wordart: '꾸민 글자', note: '메모',
+  image: '그림', sticky: '쪽지', connect: '연결선', pen: '펜 자국',
+}
+
+// 우측 인스펙터 — PPT/키노트식. 요소를 고르면 할 일별 접이식 묶음, 연결선이면 선 설정, 아무것도 없으면 페이지 설정.
 export default function RightPanel() {
   const pages = useBuilder((s) => s.pages)
   const selId = useBuilder((s) => s.selectedPageId)
@@ -51,7 +107,18 @@ export default function RightPanel() {
   const setSelConn = useCanvasUI((s) => s.setSelConn)
   const patchConn = useBuilder((s) => s.patchConn)
   const removeConn = useBuilder((s) => s.removeConn)
-  const [tab, setTab] = useState<Tab>('text')
+  /** **탭이 아니라 접이식이다**(EVER-SKETCH1 22dd552).
+   *  탭은 「지금 어느 탭인지」를 사람이 기억해야 하고, 찾는 것이 다른 탭에 있으면
+   *  네 번을 눌러 봐야 안다. 접이식은 **묶음이 늘 한 화면에** 있고, 접힌 줄에 지금 값이
+   *  적혀 있어 열지 않아도 읽힌다. 여러 개를 함께 펴 둘 수 있다.
+   *  **접고 편 상태는 기억한다**(C-2) — 안 그러면 고를 때마다 처음으로 돌아간다. */
+  const [openSec, setOpenSec] = useState<Record<Tab, boolean>>(
+    () => openSections(SECS, DEFAULT_OPEN))
+  const toggle = (k: Tab) => setOpenSec((o) => {
+    const next = { ...o, [k]: !o[k] }
+    rememberOpenSections(next)
+    return next
+  })
   const page = pages.find((p) => p.id === selId)
   const conn = (selConn != null && page) ? page.conns[selConn] : undefined
   function patchC(pt: Partial<import('../../state/store').Conn>) {
@@ -83,11 +150,15 @@ export default function RightPanel() {
    *  표를 위로 밀어 올려 계속 커질 수 있다. 진짜 천장은 종이 높이 자체다. */
   const tableAtCeiling = !!el && el.type === 'table' && el.h >= PAGE_H - 1
 
-  // 선택이 바뀌면(새 요소) 종류에 맞는 탭을 자동으로 연다(편집 중엔 안 튐 — id 변화에만 반응).
+  /** 선택이 바뀌면 종류에 맞는 묶음을 **펴 준다**(편집 중엔 안 튐 — id 변화에만 반응).
+   *
+   *  **나머지는 안 건드린다**(C-2). 넷을 다 닫고 하나만 열면 사람이 펴 둔 것이
+   *  **고를 때마다 도로 접힌다.** 이 자동 펴기는 기억에 안 적는다 — 저장은 사람이 누를 때만. */
   useEffect(() => {
     if (!el) return
     const shapeLike = ['box', 'round', 'ellipse', 'diamond', 'triangle', 'sticky', 'image', 'icon', 'table', 'wordart']
-    setTab(el.type === 'table' ? 'table' : shapeLike.includes(el.type) ? 'style' : 'text')
+    const k: Tab = el.type === 'table' ? 'cell' : shapeLike.includes(el.type) ? 'look' : 'text'
+    setOpenSec((o) => (o[k] ? o : { ...o, [k]: true }))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selElId])
 
@@ -167,46 +238,55 @@ export default function RightPanel() {
   const cellFs = (el && ts && el.cfs && el.cfs[Math.min(ts.r0, ts.r1) + '_' + Math.min(ts.c0, ts.c1)]) || (el ? el.fs : 12)
   const selCount = ts ? (Math.abs(ts.r1 - ts.r0) + 1) * (Math.abs(ts.c1 - ts.c0) + 1) : 0
 
+  const curBg = (el?.cbg && ts) ? el.cbg[Math.min(ts.r0, ts.r1) + '_' + Math.min(ts.c0, ts.c1)] : undefined
+
+  /** 접힌 줄에 적을 **지금 값**(EVER-SKETCH1 22dd552 · 93ecb00).
+   *  이게 접이식의 값어치다 — 열어 보지 않아도 읽힌다.
+   *  열어야만 알 수 있으면 이름만 바뀐 탭이다. */
+  const secSub: Record<Tab, string> = {
+    cell: el && el.type === 'table'
+      ? [ts ? `${Math.min(ts.r0, ts.r1) + 1}행 ${Math.min(ts.c0, ts.c1) + 1}열` : '칸 안 고름',
+         cellFs ? `${Math.round(cellFs)}pt` : ''].filter(Boolean).join(' · ') : '',
+    row: el && el.type === 'table' ? `${el.rows ?? 0}행 ${el.cols ?? 0}열` : '',
+    stage: curBg ? '칠함' : '없음',
+    look: el ? [el.color && el.color !== 'transparent' ? '채움' : '',
+                el.borderWidth ? `테두리 ${el.borderWidth}` : ''].filter(Boolean).join(' · ') || '기본' : '',
+    text: el ? [`${Math.round(el.fs || 0)}pt`, el.bold ? '굵게' : '', el.italic ? '기울임' : '',
+                el.underline ? '밑줄' : ''].filter(Boolean).join(' · ') : '',
+    geom: el ? [`${Math.round(el.w)}×${Math.round(el.h)}`,
+                `(${Math.round(el.x)}, ${Math.round(el.y)})`,
+                el.rot ? `${Math.round(el.rot)}°` : '',
+                el.locked ? '잠김' : ''].filter(Boolean).join(' · ') : '',
+    extra: el ? [el.shadow ? '그림자' : '', el.reflect ? '반사' : ''].filter(Boolean).join(' · ') || '없음' : '',
+    border: el && el.type === 'table'
+      ? [el.borderWidth === 0 ? '없음' : el.borderWidth === 0.5 ? '얇게' : el.borderWidth === 2 ? '굵게' : '보통',
+         el.borderDash === 'dashed' ? '파선' : el.borderDash === 'dotted' ? '점선' : '',
+         el.headRow !== false ? '머리행' : ''].filter(Boolean).join(' · ') : '',
+  }
+
+  // **무엇을 고치는 중인가**(3c07f77) — 여기는 도구가 늘어선 자리라 정작 어느 것을
+  // 고치고 있는지는 화면 가운데를 봐야 알 수 있었다.
+  const whoLabel = el ? (EL_NAME[el.type] || '도형') : ''
+  const whoSub = selCount > 1 ? `${selCount}칸 고름` : selEls.length > 1 ? `${selEls.length}개 고름` : ''
   return (
     <div className="ax-inspector">
       {el ? (
         <>
-          <div className="insp-tabs">
-            {el.type === 'table' ? <button className={tab === 'table' ? 'on' : ''} onClick={() => setTab('table')}>표</button> : null}
-            <button className={tab === 'style' ? 'on' : ''} onClick={() => setTab('style')}>스타일</button>
-            <button className={tab === 'text' ? 'on' : ''} onClick={() => setTab('text')}>텍스트</button>
-            <button className={tab === 'arrange' ? 'on' : ''} onClick={() => setTab('arrange')}>정렬</button>
+          {/* **무엇을 골랐는지 먼저 말한다**(3c07f77). 묶음보다 위라 늘 보인다. */}
+          <div className="insp-who" title={whoLabel}>
+            <span className="insp-who-t">{whoLabel}</span>
+            {whoSub ? <span className="insp-who-s">{whoSub}</span> : null}
           </div>
           <div className="insp-body">
-            {tab === 'table' && el.type === 'table' && (<>
+            {/* **묶음을 일 단위로 다시 나눴다**(93ecb00, 시안 그대로 · 사용자 결정 ㄴ).
+                표 = 칸 · 행 · 채우기 · 표 전체 글자 · 크기·자리 · 테두리·머리글,
+                그 밖 = 모양·색 · 글자 · 크기·자리 · 효과·순서.
+                **조각은 안 고쳤다** — 자리만 옮겼다(4단계에서 더한 채우기 · 테두리 없음 · 선 모양 · 정렬 그림 포함). */}
+            {el.type === 'table' ? (<>
+              <Acc k="cell" t="칸" sub={secSub.cell} sec={openSec} onToggle={toggle}>
               <div className="insp-sec">활성 셀 {ts ? `(${Math.min(ts.r0, ts.r1) + 1}행, ${Math.min(ts.c0, ts.c1) + 1}열)` : '— 표에서 셀 클릭'}</div>
-              <div className="insp-sec">행</div>
-              <div className="insp-row">
-                <button className="insp-pill" onClick={() => patchTable(addRow(el, ar))}>↑ 위에 추가</button>
-                <button className="insp-pill" onClick={() => patchTable(addRow(el, ar + 1))}>↓ 아래 추가</button>
-                <button className="insp-pill danger" onClick={() => patchTable(delRow(el, ar))}>🗑 행 삭제</button>
-              </div>
-              {/* 천장에 닿았을 때만 말한다. 늘 띄워 두면 아무도 안 읽는다. */}
-              {tableAtCeiling ? (
-                <div className="insp-hint warn">이 표가 종이 아래끝까지 찼어요. 여기서 행을 더 넣으면
-                  <b> 줄 높이가 줄어듭니다.</b> 표를 위로 옮기거나, 다음 장에 이어 적어 주세요.</div>
-              ) : (
-                <div className="insp-hint">행을 넣으면 <b>줄 높이는 그대로</b> 두고 표가 그만큼 커져요.</div>
-              )}
-              <div className="insp-sec">열</div>
-              <div className="insp-row">
-                <button className="insp-pill" onClick={() => patchTable(addCol(el, ac))}>← 왼쪽 추가</button>
-                <button className="insp-pill" onClick={() => patchTable(addCol(el, ac + 1))}>→ 오른쪽 추가</button>
-                <button className="insp-pill danger" onClick={() => patchTable(delCol(el, ac))}>🗑 열 삭제</button>
-              </div>
-              <div className="insp-sec">셀 병합</div>
-              <div className="insp-row">
-                <button className="insp-pill" disabled={!ts || (ts.r0 === ts.r1 && ts.c0 === ts.c1)} onClick={() => { if (ts) patchTable(mergeRange(el, ts.r0, ts.c0, ts.r1, ts.c1)) }}>⤢ 병합</button>
-                <button className="insp-pill" onClick={() => patchTable(unmergeAt(el, ar, ac))}>병합 해제</button>
-              </div>
               <div className="insp-sec">셀 정렬{selCount > 1 ? ` (${selCount}칸)` : ''}</div>
-              {/* **그림도 말도 파워포인트·한글을 따른다**(EVER-SKETCH1 b1911d3). 전에는
-                  유니코드 글자(⇤ ⇔ ⇥ ⤒ ⇕ ⤓)였다 — 글꼴마다 모양이 달라지고 매번 눌러 봐야 알았다. */}
+              {/* **그림도 말도 파워포인트·한글을 따른다**(EVER-SKETCH1 b1911d3). */}
               <div className="insp-row seg">
                 {(['left', 'center', 'right'] as const).map((d) => (
                   <button key={d} title={ALIGN_LABEL[d]}
@@ -226,15 +306,40 @@ export default function RightPanel() {
                     onCommit={(n) => patchTable(setCellFsRange(el, ...rng(), n))} /></label>
                 <button className="insp-pill" onClick={() => patchTable(setCellFsRange(el, ...rng(), null))}>표 기본으로</button>
               </div>
-              {/* **보통 표에도 채우기**(EVER-SKETCH1 b1911d3 · 73b6825). 칸 색(`cbg`)은 자료에도 있고
-                  화면도 그리는데 바꿀 길이 없었다. 이름은 도구줄·도형과 같은 「채우기」다 —
-                  같은 일에 이름이 둘이면 「표는 채우기랑 다른 거냐」는 물음이 나온다.
-                  (원본의 양식 표 「진행 표시」 색·이름표는 이 저장소에 없다 — 자유 색 여덟만.) */}
+              {/* **병합은 위 툴바에 있다**(3c07f77). 여기에도 있어서 두 곳이었다.
+                  툴바 쪽이 본체다 — 왜 못 누르는지 알려 주는 말까지 붙어 있다.
+                  여기 있던 것은 그런 것이 없는 맨 버튼 둘이었고, 「병합 해제」는
+                  병합 안 된 칸에서도 눌렸다. 그 자리는 「채우기」 묶음의 안내 문장이 알려 준다. */}
+              </Acc>
+              <Acc k="row" t="행" sub={secSub.row} sec={openSec} onToggle={toggle}>
+              <div className="insp-sec">행</div>
+              <div className="insp-row">
+                <button className="insp-pill" onClick={() => patchTable(addRow(el, ar))}>↑ 위에 추가</button>
+                <button className="insp-pill" onClick={() => patchTable(addRow(el, ar + 1))}>↓ 아래 추가</button>
+                <button className="insp-pill danger" onClick={() => patchTable(delRow(el, ar))}>🗑 행 삭제</button>
+              </div>
+              {/* 천장에 닿았을 때만 말한다. 늘 띄워 두면 아무도 안 읽는다. */}
+              {tableAtCeiling ? (
+                <div className="insp-hint warn">이 표가 종이 아래끝까지 찼어요. 여기서 행을 더 넣으면
+                  <b> 줄 높이가 줄어듭니다.</b> 표를 위로 옮기거나, 다음 장에 이어 적어 주세요.</div>
+              ) : (
+                <div className="insp-hint">행을 넣으면 <b>줄 높이는 그대로</b> 두고 표가 그만큼 커져요.</div>
+              )}
+              <div className="insp-sec">열</div>
+              <div className="insp-row">
+                <button className="insp-pill" onClick={() => patchTable(addCol(el, ac))}>← 왼쪽 추가</button>
+                <button className="insp-pill" onClick={() => patchTable(addCol(el, ac + 1))}>→ 오른쪽 추가</button>
+                <button className="insp-pill danger" onClick={() => patchTable(delCol(el, ac))}>🗑 열 삭제</button>
+              </div>
+              </Acc>
+              {/* **보통 표에도 채우기**(EVER-SKETCH1 b1911d3 · 73b6825). 이름은 도구줄·도형과 같은
+                  「채우기」다. (원본의 양식 표 「진행 표시」 색·이름표는 이 저장소에 없다 — 자유 색 여덟만.) */}
+              <Acc k="stage" t="채우기" sub={secSub.stage} sec={openSec} onToggle={toggle}>
               <div className="insp-sec">채우기</div>
               <div className="insp-row es-cbg-row">
                 {cellColors().map((color) => (
                   <button key={color} type="button"
-                    className={'es-cbg' + (ts && el.cbg && el.cbg[Math.min(ts.r0, ts.r1) + '_' + Math.min(ts.c0, ts.c1)] === color ? ' on' : '')}
+                    className={'es-cbg' + (curBg === color ? ' on' : '')}
                     style={{ background: cellBackground(color) }}
                     title={color}
                     disabled={!ts}
@@ -244,60 +349,15 @@ export default function RightPanel() {
                   onClick={() => { if (ts) patchTable(setCellBgRange(el, ts.r0, ts.c0, ts.r1, ts.c1, null)) }}>✕</button>
                 {/* 목록에 없는 색도 쓴다 — 여기만 막아 두면 「그 색은 왜 안 되나」가 된다. */}
                 <span className="es-cbg-more" title="다른 색">
-                  <ColorPicker value={ts && el.cbg ? el.cbg[Math.min(ts.r0, ts.r1) + '_' + Math.min(ts.c0, ts.c1)] : undefined}
+                  <ColorPicker value={curBg}
                     disabled={!ts}
                     onChange={(c) => { if (ts) patchTable(setCellBgRange(el, ts.r0, ts.c0, ts.r1, ts.c1, c)) }} />
                 </span>
               </div>
-              <div className="insp-hint">칸을 끌어 여러 칸을 한 번에 칠할 수 있어요. 위 도구줄의 <b>채우기</b>도 같은 일을 합니다.</div>
-              <div className="insp-sec">테두리 · 헤더</div>
-              <div className="insp-row">
-                <ColorPicker value={el.borderColor || '#cfd5e2'} onChange={(c) => patchTable({ borderColor: c })} />
-                <select className="insp-sel" style={{ width: 'auto' }} value={el.borderWidth ?? 1} onChange={(e) => patchTable({ borderWidth: Number(e.target.value) })}>
-                  {/* **「없음」을 넣는다**(EVER-SKETCH1 8927a75). 도형은 테두리를 없앨 수 있는데 표만
-                      얇게/보통/굵게뿐이라, 선 없는 표를 만들 길이 아예 없었다.
-                      0 이면 그리는 쪽에서 `0px solid` 가 되어 선이 사라진다. */}
-                  <option value={0}>없음</option>
-                  <option value={0.5}>얇게</option><option value={1}>보통</option><option value={2}>굵게</option>
-                </select>
-                {/* 선 모양 — 도구줄의 도형 테두리와 **같은 값**(`borderDash` · EVER-SKETCH1 f586a7b)을 쓴다. */}
-                <select className="insp-sel" style={{ width: 'auto' }} title="선 모양"
-                  value={el.borderDash || 'solid'}
-                  onChange={(e) => patchTable({ borderDash: e.target.value as 'solid' | 'dashed' | 'dotted' })}>
-                  <option value="solid">실선</option>
-                  <option value="dashed">파선</option>
-                  <option value="dotted">점선</option>
-                </select>
-                <label className="insp-check"><input type="checkbox" checked={el.headRow !== false} onChange={(e) => patchTable({ headRow: e.target.checked })} /> 헤더행</label>
-              </div>
-              <span style={cap}>셀을 드래그하면 범위가 잡힙니다(Shift+클릭도 범위). 표 위쪽·왼쪽 띠를 누르면 열·줄 통째로, 띠의 경계선을 끌면 열 너비·행 높이가 바뀝니다. 글자 수정은 칸을 더블클릭. 표 자체를 옮길 땐 왼쪽 위 모서리의 ⠿ 손잡이를 끄세요.</span>
-            </>)}
-
-            {tab === 'style' && (<>
-              {el.type === 'image' && el.src ? (<>
-                <div className="insp-sec">사진</div>
-                <div className="insp-row">
-                  <button className="insp-pill" onClick={() => fitImageBox()}>⤢ 사진 비율 맞추기</button>
-                </div>
-                <div className="insp-hint">상자를 사진 원래 비율로 맞춰 위아래 여백을 없앱니다.</div>
-              </>) : null}
-              <div className="insp-sec">프리셋 스타일</div>
-              <div className="insp-sw">{PRESETS.map((ps) => (<span key={ps.name} className="insp-preset" title={ps.name} style={{ background: ps.color, color: ps.tcolor }} onClick={() => patch({ color: ps.color, tcolor: ps.tcolor })}>가</span>))}</div>
-              <div className="insp-sec">채우기</div>
-              <div className="insp-row"><ColorPicker value={el.color} onChange={(c) => patch({ color: c })} allowTransparent /><span style={{ fontSize: 12, color: '#5b6270' }}>도형 색</span></div>
-              <div className="insp-sw">{FCOLORS.map((c) => (<span key={c} className={'insp-chip' + (el.color === c ? ' on' : '')} style={{ background: c === 'transparent' ? 'repeating-conic-gradient(#ccc 0 25%,#fff 0 50%) 50%/8px 8px' : c }} onClick={() => patch({ color: c })} />))}</div>
-              <div className="insp-sec">테두리</div>
-              <div className="insp-row"><ColorPicker value={el.borderColor || '#cfd5e2'} onChange={(c) => patch({ borderColor: c })} allowTransparent /><select className="insp-sel" style={{ width: 'auto' }} value={el.borderWidth ?? 1.5} onChange={(e) => patch({ borderWidth: Number(e.target.value) })}><option value={0}>없음</option><option value={1}>얇게</option><option value={1.5}>보통</option><option value={3}>굵게</option></select><select className="insp-sel" style={{ width: 'auto' }} title="선 모양" value={el.borderDash || 'solid'} onChange={(e) => patch({ borderDash: e.target.value as 'solid' | 'dashed' | 'dotted' })}><option value="solid">실선</option><option value="dashed">파선</option><option value="dotted">점선</option></select></div>
-              <div className="insp-sec">불투명도</div>
-              <div className="insp-row"><input className="insp-range" type="range" min={0} max={100} value={Math.round((el.opacity ?? 1) * 100)} onChange={(e) => patch({ opacity: Number(e.target.value) / 100 })} /><span style={{ fontSize: 12, color: '#5b6270', width: 42, textAlign: 'right' }}>{Math.round((el.opacity ?? 1) * 100)}%</span></div>
-              <div className="insp-sec">효과</div>
-              <div className="insp-row">
-                <label className="insp-check"><input type="checkbox" checked={!!el.shadow} onChange={(e) => patch({ shadow: e.target.checked })} /> 그림자</label>
-                <label className="insp-check"><input type="checkbox" checked={!!el.reflect} onChange={(e) => patch({ reflect: e.target.checked })} /> 반사</label>
-              </div>
-            </>)}
-
-            {tab === 'text' && (<>
+              <div className="insp-hint">칸을 끌어 여러 칸을 한 번에 칠할 수 있어요. 위 도구줄의 <b>채우기</b>도 같은 일을 합니다.
+                병합도 같은 방식이에요 — 위 툴바의 <b>표 ⤢ 병합</b>.</div>
+              </Acc>
+              <Acc k="text" t="표 전체 글자" sub={secSub.text} sec={openSec} onToggle={toggle}>
               <div className="insp-sec">글자</div>
               <div className="insp-row">
                 <button className={'insp-b' + (el.bold ? ' on' : '')} onClick={() => patch({ bold: !el.bold })}><b>B</b></button>
@@ -319,14 +379,8 @@ export default function RightPanel() {
                 <button className="insp-pill" onClick={() => emit('ebook:bullet')}>글머리표</button>
                 <button className="insp-pill" onClick={() => emit('ebook:fmt-clear')}>서식 지우기</button>
               </div>
-            </>)}
-
-            {tab === 'arrange' && (<>
-              <div className="insp-sec">순서</div>
-              <div className="insp-row">
-                <button className="insp-pill" onClick={() => emit('ebook:z-front')}>맨 앞으로</button>
-                <button className="insp-pill" onClick={() => emit('ebook:z-back')}>맨 뒤로</button>
-              </div>
+              </Acc>
+              <Acc k="geom" t="크기 · 자리" sub={secSub.geom} sec={openSec} onToggle={toggle}>
               <div className="insp-sec">크기</div>
               <div className="insp-row">{numRow('너비', el.w, (n) => patch({ w: Math.max(10, n) }), 10)}{numRow('높이', el.h, (n) => patch({ h: Math.max(10, n) }), 10)}</div>
               <div className="insp-sec">위치</div>
@@ -352,6 +406,109 @@ export default function RightPanel() {
                 <button className="insp-pill" disabled={el.groupId == null} onClick={() => { if (page && el.groupId != null) ungroupEls(page.id, page.els.filter((x) => x.groupId === el.groupId).map((x) => x.id)) }}>그룹 해제</button>
               </div>
               <span style={cap}>여러 요소를 Shift+클릭하거나 빈 곳을 드래그해 함께 고른 뒤 그룹화하세요.</span>
+              </Acc>
+              <Acc k="border" t="테두리 · 머리글" sub={secSub.border} sec={openSec} onToggle={toggle}>
+              <div className="insp-sec">테두리 · 헤더</div>
+              <div className="insp-row">
+                <ColorPicker value={el.borderColor || '#cfd5e2'} onChange={(c) => patchTable({ borderColor: c })} />
+                <select className="insp-sel" style={{ width: 'auto' }} value={el.borderWidth ?? 1} onChange={(e) => patchTable({ borderWidth: Number(e.target.value) })}>
+                  {/* **「없음」을 넣는다**(EVER-SKETCH1 8927a75). 0 이면 그리는 쪽에서 `0px solid` 가 되어 선이 사라진다. */}
+                  <option value={0}>없음</option>
+                  <option value={0.5}>얇게</option><option value={1}>보통</option><option value={2}>굵게</option>
+                </select>
+                {/* 선 모양 — 도구줄의 도형 테두리와 **같은 값**(`borderDash` · EVER-SKETCH1 f586a7b)을 쓴다. */}
+                <select className="insp-sel" style={{ width: 'auto' }} title="선 모양"
+                  value={el.borderDash || 'solid'}
+                  onChange={(e) => patchTable({ borderDash: e.target.value as 'solid' | 'dashed' | 'dotted' })}>
+                  <option value="solid">실선</option>
+                  <option value="dashed">파선</option>
+                  <option value="dotted">점선</option>
+                </select>
+                <label className="insp-check"><input type="checkbox" checked={el.headRow !== false} onChange={(e) => patchTable({ headRow: e.target.checked })} /> 헤더행</label>
+              </div>
+              <span style={cap}>셀을 드래그하면 범위가 잡힙니다(Shift+클릭도 범위). 표 위쪽·왼쪽 띠를 누르면 열·줄 통째로, 띠의 경계선을 끌면 열 너비·행 높이가 바뀝니다. 글자 수정은 칸을 더블클릭. 표 자체를 옮길 땐 왼쪽 위 모서리의 ⠿ 손잡이를 끄세요.</span>
+              </Acc>
+            </>) : (<>
+              <Acc k="look" t="모양 · 색" sub={secSub.look} sec={openSec} onToggle={toggle}>
+              {el.type === 'image' && el.src ? (<>
+                <div className="insp-sec">사진</div>
+                <div className="insp-row">
+                  <button className="insp-pill" onClick={() => fitImageBox()}>⤢ 사진 비율 맞추기</button>
+                </div>
+                <div className="insp-hint">상자를 사진 원래 비율로 맞춰 위아래 여백을 없앱니다.</div>
+              </>) : null}
+              <div className="insp-sec">프리셋 스타일</div>
+              <div className="insp-sw">{PRESETS.map((ps) => (<span key={ps.name} className="insp-preset" title={ps.name} style={{ background: ps.color, color: ps.tcolor }} onClick={() => patch({ color: ps.color, tcolor: ps.tcolor })}>가</span>))}</div>
+              <div className="insp-sec">채우기</div>
+              <div className="insp-row"><ColorPicker value={el.color} onChange={(c) => patch({ color: c })} allowTransparent /><span style={{ fontSize: 12, color: '#5b6270' }}>도형 색</span></div>
+              <div className="insp-sw">{FCOLORS.map((c) => (<span key={c} className={'insp-chip' + (el.color === c ? ' on' : '')} style={{ background: c === 'transparent' ? 'repeating-conic-gradient(#ccc 0 25%,#fff 0 50%) 50%/8px 8px' : c }} onClick={() => patch({ color: c })} />))}</div>
+              <div className="insp-sec">테두리</div>
+              <div className="insp-row"><ColorPicker value={el.borderColor || '#cfd5e2'} onChange={(c) => patch({ borderColor: c })} allowTransparent /><select className="insp-sel" style={{ width: 'auto' }} value={el.borderWidth ?? 1.5} onChange={(e) => patch({ borderWidth: Number(e.target.value) })}><option value={0}>없음</option><option value={1}>얇게</option><option value={1.5}>보통</option><option value={3}>굵게</option></select><select className="insp-sel" style={{ width: 'auto' }} title="선 모양" value={el.borderDash || 'solid'} onChange={(e) => patch({ borderDash: e.target.value as 'solid' | 'dashed' | 'dotted' })}><option value="solid">실선</option><option value="dashed">파선</option><option value="dotted">점선</option></select></div>
+              <div className="insp-sec">불투명도</div>
+              <div className="insp-row"><input className="insp-range" type="range" min={0} max={100} value={Math.round((el.opacity ?? 1) * 100)} onChange={(e) => patch({ opacity: Number(e.target.value) / 100 })} /><span style={{ fontSize: 12, color: '#5b6270', width: 42, textAlign: 'right' }}>{Math.round((el.opacity ?? 1) * 100)}%</span></div>
+              </Acc>
+              <Acc k="text" t="글자" sub={secSub.text} sec={openSec} onToggle={toggle}>
+              <div className="insp-sec">글자</div>
+              <div className="insp-row">
+                <button className={'insp-b' + (el.bold ? ' on' : '')} onClick={() => patch({ bold: !el.bold })}><b>B</b></button>
+                <button className={'insp-b' + (el.italic ? ' on' : '')} onClick={() => patch({ italic: !el.italic })}><i>I</i></button>
+                <button className={'insp-b' + (el.underline ? ' on' : '')} onClick={() => patch({ underline: !el.underline })}><u>U</u></button>
+                <label className="insp-num sm"><span>크기</span>
+                  <NumInput value={el.fs} min={6} max={200} ariaLabel="글자 크기"
+                    onCommit={(n) => patch({ fs: n })} /></label>
+                <ColorPicker value={el.tcolor || '#1a1a1a'} onChange={(c) => patch({ tcolor: c })} />
+              </div>
+              <div className="insp-sec">정렬</div>
+              <div className="insp-row seg">
+                {(['left', 'center', 'right'] as const).map((d) => (
+                  <button key={d} className={(el.align || 'left') === d ? 'on' : ''} title={ALIGN_LABEL[d]}
+                    onClick={() => patch({ align: d })}><AlignIcon dir={d} /></button>
+                ))}
+              </div>
+              <div className="insp-row">
+                <button className="insp-pill" onClick={() => emit('ebook:bullet')}>글머리표</button>
+                <button className="insp-pill" onClick={() => emit('ebook:fmt-clear')}>서식 지우기</button>
+              </div>
+              </Acc>
+              <Acc k="geom" t="크기 · 자리" sub={secSub.geom} sec={openSec} onToggle={toggle}>
+              <div className="insp-sec">크기</div>
+              <div className="insp-row">{numRow('너비', el.w, (n) => patch({ w: Math.max(10, n) }), 10)}{numRow('높이', el.h, (n) => patch({ h: Math.max(10, n) }), 10)}</div>
+              <div className="insp-sec">위치</div>
+              <div className="insp-row">{numRow('X', el.x, (n) => patch({ x: n }))}{numRow('Y', el.y, (n) => patch({ y: n }))}</div>
+              <div className="insp-sec">회전</div>
+              <div className="insp-row">{numRow('각도', el.rot || 0, (n) => patch({ rot: ((n % 360) + 360) % 360 }))}<button className="insp-pill" onClick={() => emit('ebook:el-center')}>가로 중앙</button></div>
+              <div className="insp-sec">뒤집기</div>
+              <div className="insp-row">
+                <button className={'insp-pill' + (el.flipH ? ' on' : '')} onClick={() => patch({ flipH: !el.flipH })}>↔ 좌우</button>
+                <button className={'insp-pill' + (el.flipV ? ' on' : '')} onClick={() => patch({ flipV: !el.flipV })}>↕ 상하</button>
+              </div>
+              </Acc>
+              <Acc k="extra" t="효과 · 순서" sub={secSub.extra} sec={openSec} onToggle={toggle}>
+              <div className="insp-sec">효과</div>
+              <div className="insp-row">
+                <label className="insp-check"><input type="checkbox" checked={!!el.shadow} onChange={(e) => patch({ shadow: e.target.checked })} /> 그림자</label>
+                <label className="insp-check"><input type="checkbox" checked={!!el.reflect} onChange={(e) => patch({ reflect: e.target.checked })} /> 반사</label>
+              </div>
+              <div className="insp-sec">순서</div>
+              <div className="insp-row">
+                <button className="insp-pill" onClick={() => emit('ebook:z-front')}>맨 앞으로</button>
+                <button className="insp-pill" onClick={() => emit('ebook:z-back')}>맨 뒤로</button>
+              </div>
+              <div className="insp-sec">잠금</div>
+              <div className="insp-row">
+                <button className={'insp-pill' + (el.locked ? ' on' : '')} onClick={() => patch({ locked: !el.locked })}>{el.locked ? '🔒 잠금 해제' : '🔓 잠금'}</button>
+              </div>
+              <div className="insp-row" style={{ marginTop: 10 }}>
+                <button className="insp-pill" onClick={() => emit('ebook:dup')}>⧉ 복제</button>
+                <button className="insp-pill danger" onClick={() => emit('ebook:del')}>🗑 삭제</button>
+              </div>
+              <div className="insp-sec">그룹</div>
+              <div className="insp-row">
+                <button className="insp-pill" disabled={selEls.length < 2} onClick={() => { if (page && selEls.length >= 2) groupEls(page.id, selEls) }}>⧉ 그룹화</button>
+                <button className="insp-pill" disabled={el.groupId == null} onClick={() => { if (page && el.groupId != null) ungroupEls(page.id, page.els.filter((x) => x.groupId === el.groupId).map((x) => x.id)) }}>그룹 해제</button>
+              </div>
+              <span style={cap}>여러 요소를 Shift+클릭하거나 빈 곳을 드래그해 함께 고른 뒤 그룹화하세요.</span>
+              </Acc>
             </>)}
           </div>
         </>

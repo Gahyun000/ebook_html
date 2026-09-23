@@ -15,7 +15,7 @@
 // 이 저장소에는 **표준 양식 슬롯이 없다**(slots.ts · CBG_LABEL · cbgPalette 없음). 그래서
 //   · 칸 색 목록은 `src/canvas/cellColor.ts` 의 `CBG_FREE` / `cellColors()` 를 본다(슬롯 인자 없음)
 //   · 슬롯 표 전용 검사(양식 색이 앞에 선다 · slotAllows · CBG_LABEL · 「진행 표시」 이름)는 뺐다 — 자리마다 주석
-//   · 오른쪽 패널은 아직 옛 탭 모양이라(5단계에서 묶음으로 바뀐다) 패널 쪽은 **같은 뜻을 지금 모양으로** 본다
+//   · 오른쪽 패널은 5단계에서 탭 → 접이식 묶음으로 바뀌었다 — 패널 쪽은 **같은 뜻을 지금 모양으로** 본다
 // 5a4afce(그리기 도구 접기)의 원래 시험은 e2e 뿐이라 ⑦ 을 새로 붙였다.
 //
 // 실행: node --experimental-strip-types --import ./ts_register.mjs editor_tools.test.mjs
@@ -78,11 +78,13 @@ check(CBG_FREE.every((c) => /^#[0-9A-F]{6}$/.test(c)), '모두 #RRGGBB 다')
 check(/cellColors\(\)\.map/.test(rp), '화면이 그 답을 쓴다 — 제 손으로 안 가른다')
 check(/es-cbg-more/.test(rp), '목록에 없는 색도 고를 수 있다')
 // (ebook_html) 원본은 묶음 이름이 표에 따라 갈리는지(`palette ? '진행 표시 · 채우기' : '채우기'`) 본다.
-// 슬롯이 없어 이름은 늘 「채우기」 하나다 — 그 이름이 **표 탭 안에** 붙었는지를 본다.
+// 슬롯이 없어 이름은 늘 「채우기」 하나다 — 그 이름이 **표 갈래의 「채우기」 묶음 안에** 붙었는지를 본다.
+// (5단계 · 22dd552/93ecb00 — 탭이 접이식 묶음으로 바뀌어, 「표 탭」 대신 `<Acc k="stage" t="채우기">` 를 본다.)
 {
-  const i = rp.indexOf("tab === 'table' && el.type === 'table'")
-  const tab = i < 0 ? '' : rp.slice(i, rp.indexOf("tab === 'style'", i))
-  check(/className="insp-sec">채우기/.test(tab), '표 탭에 「채우기」 묶음이 있다')
+  const i = rp.indexOf('<Acc k="stage" t="채우기"')
+  const tab = i < 0 ? '' : rp.slice(i, rp.indexOf('</Acc>', i))
+  check(i > 0 && rp.lastIndexOf("el.type === 'table' ?", i) > 0, '「채우기」 묶음이 표 갈래에 있다')
+  check(/className="insp-sec">채우기/.test(tab), '표 채우기 묶음에 「채우기」 이름표가 있다')
   check(!/'칸 색'|>칸 색</.test(rp), '옛 이름 「칸 색」이 패널에 안 남아 있다')
   check(/setCellBgRange\(el, ts\.r0, ts\.c0, ts\.r1, ts\.c1, color\)/.test(tab), '패널도 고른 범위 전체를 칠한다')
   check(/setCellBgRange\(el, ts\.r0, ts\.c0, ts\.r1, ts\.c1, null\)/.test(tab), '패널에도 지우는 길이 있다')

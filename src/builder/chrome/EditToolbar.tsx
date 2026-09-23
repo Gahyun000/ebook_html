@@ -3,7 +3,7 @@ import { useKey } from '../../ui/keyLabel'
 import type { Tool } from '../../state/canvasUI'
 import { useSelEl } from '../useSelEl'
 import ColorPicker from './ColorPicker'
-import { NO_FILL } from '../../canvas/model'
+import { NO_FILL, pushSnap } from '../../canvas/model'
 import { SHAPE_RADIUS, polyClip } from '../../canvas/shapePaths'
 import { cellColors } from '../../canvas/cellColor'
 import { ALIGN_LABEL, AlignIcon } from '../../ui/alignIcons'
@@ -281,6 +281,41 @@ function InkTools() {
  * 그만큼 아래 문서가 통째로 내려간다(원본 실측 42px). 칸을 끌던 사람은 한 줄 아래까지 고르게 된다.
  * 끌어 고른 범위가 몇 칸인지도 여기서 말해 준다.
  */
+/**
+ * **연결선을 고르면 둘째 줄이 선 도구가 된다**(EVER-SKETCH1 a48539f C-1).
+ * 모양(직선·직각·곡선)과 화살촉 — 오른쪽 패널의 연결선 칸과 **같은 값 · 같은 말**을 쓴다.
+ * 기본 모양은 캔버스가 그리는 기본(`'ortho'`)과 맞춘다 — 원본은 여기만 'straight' 로 읽어
+ * 그려진 모양과 눌린 단추가 어긋났다. 이름도 패널과 같은 「직각」이다(원본은 「꺾은선」).
+ */
+function ConnTools() {
+  const selConn = useCanvasUI((s) => s.selConn)
+  const pages = useBuilder((s) => s.pages)
+  const selId = useBuilder((s) => s.selectedPageId)
+  const patchConn = useBuilder((s) => s.patchConn)
+  const page = pages.find((p) => p.id === selId)
+  if (selConn == null || !page) return null
+  const conn = page.conns[selConn]
+  if (!conn) return null
+  const patchC = (pt: Partial<typeof conn>) => {
+    pushSnap(page.id, JSON.stringify({ els: page.els, conns: page.conns, strokes: page.strokes, detached: page.detached }))
+    patchConn(page.id, selConn, pt)
+  }
+  return (
+    <span className="ax-grp gs">
+      <span className="lab">연결선</span>
+      {([['straight', '직선'], ['ortho', '직각'], ['curve', '곡선']] as const).map(([k, t]) => (
+        <button key={k} className={'tbtn' + ((conn.kind || 'ortho') === k ? ' on' : '')}
+          onClick={() => patchC({ kind: k })}>{t}</button>
+      ))}
+      <span className="dv" />
+      {([['end', '→'], ['both', '↔'], ['none', '—']] as const).map(([k, t]) => (
+        <button key={k} className={'tbtn' + ((conn.arrow || 'end') === k ? ' on' : '')}
+          title="화살촉" onClick={() => patchC({ arrow: k })}>{t}</button>
+      ))}
+    </span>
+  )
+}
+
 function TableTools() {
   const { el, patch } = useSelEl()
   const tableSel = useCanvasUI((s) => s.tableSel)
@@ -431,8 +466,11 @@ export default function EditToolbar() {
 
   /** 둘째 줄이 무엇을 보일까(EVER-SKETCH1 a48539f C-1). **표가 먼저다** — 표 도구(병합·채우기)는
    *  여기밖에 없다. 글상자·도형이면 글자·색 도구, 아무것도 없으면 「표를 고르세요」가 자리를 지킨다.
-   *  (원본의 연결선 도구 갈래는 오른쪽 패널 이식(5단계) 때 함께 본다.) */
-  const ctx: 'table' | 'text' = el && el.type !== 'table' ? 'text' : 'table'
+   *  연결선을 고르면 선 도구(5단계에서 함께 옮겼다). */
+  const selConnIdx = useCanvasUI((s) => s.selConn)
+  const ctx: 'table' | 'text' | 'conn' = el && el.type === 'table' ? 'table'
+    : selConnIdx != null ? 'conn'
+      : el ? 'text' : 'table'
 
   return (
     /* 두 줄로 나눈다(EVER-SKETCH1 b721df0).
@@ -501,9 +539,9 @@ export default function EditToolbar() {
       </span>
      </div>
 
-     {/* **자리는 고정, 내용만 바뀐다.** 표면 표 도구, 글상자·도형이면 글자·색 도구. */}
+     {/* **자리는 고정, 내용만 바뀐다.** 표면 표 도구, 글상자·도형이면 글자·색 도구, 연결선이면 선 도구. */}
      <div className="ax-tbrow ctx">
-      {ctx === 'text' ? <TextTools /> : <TableTools />}
+      {ctx === 'text' ? <TextTools /> : ctx === 'conn' ? <ConnTools /> : <TableTools />}
      </div>
     </div>
   )
