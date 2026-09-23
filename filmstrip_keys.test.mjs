@@ -13,10 +13,9 @@
 // 전역으로 걸면 정면으로 부딪힌다. 파워포인트도 **초점이 어디 있느냐**로 가른다.
 // 그래서 이 목록 안에서만 듣고, 처리한 키는 캔버스까지 안 보낸다.
 //
-// ebook_html 이식(EVER-SKETCH1 1219bbd): 이 저장소의 addCard('slide') 는 아직 **맨 끝**에
-// 붙인다(「고른 것 바로 뒤」 slideSpot 은 4단계 새 페이지에서 들어온다). 그래서 도움말이
-// 「고른 것 바로 뒤」라고 적는지 보던 검사는 「어디에 생기는지 적는다(맨 끝)」로 바꿨다 —
-// 화면이 하지 않는 일을 도움말이 약속하면 안 된다. 4단계에서 원래 검사로 되돌린다.
+// ebook_html 이식(EVER-SKETCH1 1219bbd): 1단계에서는 addCard('slide') 가 아직 **맨 끝**에 붙여서
+// 도움말 검사를 잠시 「(맨 끝)」으로 바꿔 두었다. **4단계에서 원래 검사로 되돌렸다** —
+// 「고른 것 바로 뒤」(slideSpot · EVER-SKETCH1 90e7439)가 이제 이 저장소에도 있다(slide_order.test.mjs).
 //
 // 실행: node filmstrip_keys.test.mjs
 import { readFileSync } from 'node:fs'
@@ -95,8 +94,8 @@ const css = readFileSync('./src/builder/chrome.css', 'utf8').replace(/\/\*[\s\S]
   const help = bare(readFileSync('./src/builder/Help.tsx', 'utf8'))
   check(/'↑ ↓ · Enter'/.test(help) && /슬라이드 목록에서/.test(help),
     '**도움말 단축키 표에 적혀 있다** — 이 키를 알 길이 그것뿐이다')
-  check(/새 슬라이드\(맨 끝\)/.test(help),
-    '어디에 생기는지도 적는다 — 지금은 맨 끝이다(4단계에서 「고른 것 바로 뒤」)')
+  check(/새 슬라이드\(고른 것 바로 뒤\)/.test(help),
+    '어디에 생기는지도 적는다 — 「맨 끝에 생기겠지」로 읽히면 안 된다')
 }
 
 console.log(`\n${pass} passed, ${fail} failed`)

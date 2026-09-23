@@ -34,11 +34,11 @@ const thumbs = p.locator('.axth-list .axth')
 const onIndex = () => p.evaluate(() => Array.from(document.querySelectorAll('.axth-list .axth')).findIndex((n) => n.classList.contains('on')))
 const layer = () => p.locator('.stage .freelayer:not(.off)').first()
 
-/** 캔버스에 글상자 하나를 놓고 고른 채로 둔다. */
-async function placeText(dx = 200, dy = 160) {
-  const bb = await layer().boundingBox()
+/** 캔버스에 글상자 하나를 놓고 고른 채로 둔다.
+ *  4단계(EVER-SKETCH1 90e7439)부터 T 는 **누르는 즉시** 종이 한가운데에 놓고 커서까지 넣는다 —
+ *  캔버스를 한 번 더 누르던 걸음이 없어졌다. (인자는 옛 호출과 맞추려고 남겨 둔다.) */
+async function placeText(_dx = 200, _dy = 160) {
   await p.locator('.ib[title="텍스트"]').first().click()
-  await p.mouse.click(bb.x + dx, bb.y + dy)
   await p.waitForTimeout(250)
 }
 
@@ -237,8 +237,8 @@ STAGES.push(['2단계 · 화면 배율', async () => {
 STAGES.push(['2단계 · 표 칸 끌기 · ⠿ 이동 · 다시 열기', async () => {
   const tblFel = () => layer().locator('.fel:has(.feltable)').first()
   const lb = await layer().boundingBox()
+  // 4단계(90e7439)부터 표 단추는 **누르는 즉시** 한가운데에 놓는다 — 캔버스를 한 번 더 누르지 않는다.
   await p.locator('.ib[title="표"]').first().click()
-  await p.mouse.click(lb.x + lb.width * 0.4, lb.y + lb.height * 0.35)
   await p.waitForTimeout(300)
   ok('[표] 표가 놓였다', (await layer().locator('.feltable').count()) === 1)
 
@@ -318,8 +318,7 @@ STAGES.push(['3단계 · 표 편집 · 한글 입력', async () => {
   const lb = await layer().boundingBox()
   const blank = { x: lb.x + lb.width - 15, y: lb.y + lb.height - 15 }
 
-  await p.locator('.ib[title="표"]').first().click()
-  await p.mouse.click(lb.x + lb.width * 0.3, lb.y + lb.height * 0.35)
+  await p.locator('.ib[title="표"]').first().click()   // 4단계부터 누르는 즉시 놓인다
   await p.waitForTimeout(300)
   ok('[표3] 표가 놓였다', (await layer().locator('.feltable').count()) === 1)
 
@@ -463,6 +462,147 @@ STAGES.push(['3단계 · 표 편집 · 한글 입력', async () => {
   const t21 = await cell(2, 1).innerText(), t11 = await cell(1, 1).innerText(), t20 = await cell(2, 0).innerText()
   ok('[표3] 다시 열어도 칸 글(「ab」·「가나」·「가나」)이 그대로다', t20 === 'ab' && t21 === '가나' && t11 === '가나',
     [t20, t21, t11].map((s) => JSON.stringify(s)).join(' · '))
+}])
+
+// ── 4단계 ─────────────────────────────────────────────────
+// 도구줄 색(8927a75) · 채우기(b1911d3·8513fe1·73b6825) · 테두리 선 모양(f586a7b·518611b) ·
+// 요소 위에 놓기(46f155c) · 고르면 바로 놓기(e4dfbfd·90e7439) · 그리기 접기(5a4afce) · 새 슬라이드 자리(90e7439)
+STAGES.push(['4단계 · PPT 식 도구줄 · 표 채우기 · 새 슬라이드 자리', async () => {
+  await freshBook()
+  const fels = () => layer().locator('.fel')
+  const ctxRow = p.locator('.ax-tbrow.ctx')
+  const grp = (name) => ctxRow.locator(`.ax-grp[title="${name}"]`)
+  async function pickShape(label) {
+    await p.locator('.ib.shp-btn').first().click(); await p.waitForTimeout(150)
+    await p.locator(`.shp-pop .shp-cell[title="${label}"]`).click(); await p.waitForTimeout(250)
+  }
+  const lb = await layer().boundingBox()
+  const blank = { x: lb.x + lb.width - 12, y: lb.y + lb.height - 12 }
+
+  // ⑤ 그리기 도구는 접혀 있고, 눌러야 펴진다
+  ok('[그리기] 처음엔 펜 칸이 접혀 있다', (await p.locator('.ib[title^="펜(두께"]').count()) === 0)
+  await p.locator('.tbtn.draw-toggle').click(); await p.waitForTimeout(150)
+  ok('[그리기] 「그리기 ▾」 를 누르면 펜·형광펜·지우개가 펴진다',
+    (await p.locator('.ib[title^="펜(두께"]').count()) === 1 && (await p.locator('.ib[title^="지우개"]').count()) === 1)
+  await p.locator('.tbtn.draw-toggle').click(); await p.waitForTimeout(150)
+
+  // ① 도형은 고르는 즉시 놓인다 — 캔버스를 한 번 더 누르지 않는다
+  const n0 = await fels().count()
+  await pickShape('사각형')
+  const n1 = await fels().count()
+  ok('[바로 놓기] 도형을 고르면 캔버스를 안 눌러도 놓인다', n1 === n0 + 1, `${n0} → ${n1}`)
+  const cur = await layer().evaluate((n) => n.style.cursor)
+  ok('[바로 놓기] 놓고 나면 도구가 고르기로 돌아온다(십자 커서 아님)', cur !== 'crosshair', JSON.stringify(cur))
+  await pickShape('사각형')
+  const pos = await layer().locator('.fel.box').evaluateAll((ns) => ns.map((n) => [parseFloat(n.style.left), parseFloat(n.style.top)]))
+  ok('[바로 놓기] 연달아 놓으면 16px 비껴 놓인다', pos.length === 2 && pos[1][0] - pos[0][0] === 16 && pos[1][1] - pos[0][1] === 16,
+    JSON.stringify(pos))
+
+  // ② 도형을 고르면 둘째 줄에 이름 붙은 「글자 색 · 채우기 · 테두리」
+  const labs = await ctxRow.locator('.ax-grp > .lab').evaluateAll((ns) => ns.map((n) => n.textContent))
+  ok('[도구줄] 도형을 고르면 글자 색 · 채우기 · 테두리가 이름 붙어 뜬다',
+    ['글자 색', '채우기', '테두리'].every((t) => labs.includes(t)), labs.join(' · '))
+  if (SHOT_DIR) await p.locator('.ax-tb').screenshot({ path: SHOT_DIR + '/stage4_toolbar_shape.png' })
+  // ▾ 로 고른 색이 칠해지고, 띠가 그 색을 기억한다
+  await grp('채우기').locator('.cp-caret').click(); await p.waitForTimeout(150)
+  await p.locator('.cp-pop .cp-sw[title="#e0553c"]').first().click(); await p.waitForTimeout(200)
+  const sel = () => layer().locator('.fel.sel').first()
+  const bg = await sel().evaluate((n) => getComputedStyle(n).backgroundColor)
+  ok('[채우기] ▾ 로 고른 색이 도형에 칠해진다', bg === 'rgb(224, 85, 60)', bg)
+  const bar = await grp('채우기').locator('.ax-inkbar').evaluate((n) => getComputedStyle(n).backgroundColor)
+  ok('[채우기] 단추 밑 띠가 그 색을 기억한다', bar === 'rgb(224, 85, 60)', bar)
+  // 테두리 선 모양
+  await grp('테두리').locator('button[title="파선"]').click(); await p.waitForTimeout(200)
+  const bs = await sel().evaluate((n) => getComputedStyle(n).borderTopStyle)
+  ok('[테두리] 「파선」 을 누르면 도형 테두리가 파선이 된다', bs === 'dashed', bs)
+
+  // ③ 오려 만든 도형(마름모)에도 테두리가 선다
+  await pickShape('마름모')
+  const dia = layer().locator('.fel.diamond').last()
+  const dInfo = await dia.evaluate((n) => ({ bw: getComputedStyle(n).borderTopWidth, clip: getComputedStyle(n).clipPath,
+    poly: n.querySelector('svg.fel-outline polygon')?.getAttribute('points') || '' }))
+  ok('[마름모] 모양대로 오리고 상자 테두리는 끈다', /polygon/.test(dInfo.clip) && dInfo.bw === '0px', JSON.stringify(dInfo))
+  ok('[마름모] 그 위에 테두리 선(SVG)을 얹는다', dInfo.poly.split(' ').length === 4, dInfo.poly)
+  await grp('테두리').locator('button[title="점선"]').click(); await p.waitForTimeout(200)
+  const da = await dia.locator('svg.fel-outline polygon').getAttribute('stroke-dasharray')
+  ok('[마름모] 점선을 고르면 선도 점선이 된다', !!da && /^0\.01 /.test(da), String(da))
+
+  // ④ 글상자 위에도 도형이 그려진다(단축키로 든 도형 → 찍어서 놓기)
+  await placeText()                                     // T 도 바로 놓이고 커서가 들어간다
+  const editing = await p.evaluate(() => !!document.activeElement && document.activeElement.isContentEditable)
+  ok('[바로 놓기] T 를 누르면 글상자가 놓이고 바로 쓸 수 있다', editing)
+  await p.mouse.click(blank.x, blank.y); await p.waitForTimeout(200)
+  const tb = await layer().locator('.fel.text').last().boundingBox()
+  await p.evaluate(() => { const a = document.activeElement; if (a && a.blur) a.blur() })
+  await p.keyboard.press('r'); await p.waitForTimeout(100)
+  const m0 = await fels().count()
+  const at = { x: tb.x + tb.width / 2, y: tb.y + tb.height / 2 }
+  await p.mouse.click(at.x, at.y); await p.waitForTimeout(250)
+  const m1 = await fels().count()
+  const nb = await layer().locator('.fel.box').last().boundingBox()
+  ok('[요소 위] 글상자 위를 눌러도 도형이 생긴다', m1 === m0 + 1 && nb.x <= at.x && at.x <= nb.x + nb.width && nb.y <= at.y && at.y <= nb.y + nb.height,
+    `${m0} → ${m1}`)
+
+  // ⑥ 표 채우기 — 위 도구줄에서 (새 슬라이드에서)
+  await thumbs.nth(0).click(); await p.keyboard.press('Enter'); await p.waitForTimeout(300)
+  await p.locator('.ib[title="표"]').first().click(); await p.waitForTimeout(300)
+  const tblFel = () => layer().locator('.fel:has(.feltable)').first()
+  const cell = (r, c) => tblFel().locator(`.feltd[data-r="${r}"][data-c="${c}"]`)
+  ok('[표 채우기] 칸을 안 고르면 채우기가 잠겨 있다',
+    await ctxRow.locator('.ax-grp:has(> .lab:text-is("채우기")) .cp-trig').isDisabled())
+  await cell(1, 1).click(); await p.waitForTimeout(150)
+  await ctxRow.locator('.ax-grp:has(> .lab:text-is("채우기")) .cp-trig').click(); await p.waitForTimeout(150)
+  const headN = await p.locator('.cp-pop .cp-lab', { hasText: '채우기' }).count()
+  ok('[표 채우기] 고르개 맨 위에 「채우기」 자유 색 줄이 있다', headN === 1)
+  await p.locator('.cp-pop .cp-sw[title="#FDF0F0"]').first().click(); await p.waitForTimeout(200)
+  // 열 경계도 끌어 둔다(다시 열었을 때 colw 가 남는지 본다)
+  const gc = layer().locator('.trk-grip.trk-col').first()
+  const gb = await gc.boundingBox()
+  await p.mouse.move(gb.x + gb.width / 2, gb.y + gb.height / 2); await p.mouse.down()
+  for (let i = 1; i <= 6; i++) await p.mouse.move(gb.x + gb.width / 2 + 7 * i, gb.y + gb.height / 2)
+  await p.mouse.up(); await p.waitForTimeout(200)
+  await p.mouse.click(blank.x, blank.y); await p.waitForTimeout(200)   // 칸 고르기를 풀어야 제 색이 보인다
+  const cbg = await cell(1, 1).evaluate((n) => getComputedStyle(n).backgroundColor)
+  ok('[표 채우기] 도구줄에서 고른 색이 그 칸에 칠해진다', cbg === 'rgb(253, 240, 240)', cbg)
+  const other = await cell(1, 0).evaluate((n) => getComputedStyle(n).backgroundColor)
+  ok('[표 채우기] 고르지 않은 칸은 그대로다', other !== 'rgb(253, 240, 240)', other)
+  const cw = async () => (await cell(0, 0).boundingBox()).width / (await cell(0, 1).boundingBox()).width
+  const ratio = await cw()
+  ok('[표] 열 경계를 끌면 두 열 너비가 달라진다', ratio > 1.2, ratio.toFixed(3))
+
+  // ⑦ 새 슬라이드는 **고른 것 바로 뒤**
+  await thumbs.nth(1).click(); await p.keyboard.press('Enter'); await p.waitForTimeout(300)
+  const k0 = await thumbs.count()
+  await thumbs.nth(0).click(); await p.waitForTimeout(150)
+  await p.keyboard.press('Enter'); await p.waitForTimeout(300)
+  const k1 = await thumbs.count(), idx = await onIndex()
+  ok('[새 슬라이드] 3장 중 1번째를 고르고 만들면 2번째에 들어간다', k0 === 3 && k1 === 4 && idx === 1, `${k0}→${k1} · 고른 자리 ${idx}`)
+  ok('[새 슬라이드] 새 쪽은 비어 있다', (await layer().locator('.fel').count()) === 0)
+  await thumbs.nth(2).click(); await p.waitForTimeout(200)
+  ok('[새 슬라이드] 표가 있던 쪽은 한 칸 뒤(3번째)로 밀렸다', (await layer().locator('.feltable').count()) === 1)
+
+  // ⑧ 다시 열어도 채우기 · 선 모양 · 열 너비가 남는다
+  for (let i = 0; i < 30; i++) {
+    const st = await p.locator('.save-lab').innerText().catch(() => '')
+    if (st === '저장됨') break
+    await p.waitForTimeout(300)
+  }
+  await p.waitForTimeout(1200)
+  await p.goto(URL, { waitUntil: 'networkidle' })
+  await p.locator('.lib-open-hit').first().click()
+  await p.waitForSelector('.ax-app .axth', { timeout: 15000 }); await p.waitForTimeout(500)
+  await thumbs.nth(0).click(); await p.waitForTimeout(250)
+  const dashed = await layer().locator('.fel.box').evaluateAll((ns) => ns.filter((n) => getComputedStyle(n).borderTopStyle === 'dashed').length)
+  ok('[다시 열기] 도형의 파선 테두리가 그대로다', dashed === 1, String(dashed))
+  const fillKept = await layer().locator('.fel.box').evaluateAll((ns) => ns.some((n) => getComputedStyle(n).backgroundColor === 'rgb(224, 85, 60)'))
+  ok('[다시 열기] 도형 채우기 색이 그대로다', fillKept)
+  const da2 = await layer().locator('.fel.diamond svg.fel-outline polygon').first().getAttribute('stroke-dasharray')
+  ok('[다시 열기] 마름모 점선 테두리가 그대로다', !!da2 && /^0\.01 /.test(da2), String(da2))
+  await thumbs.nth(2).click(); await p.waitForTimeout(250)
+  const cbg2 = await cell(1, 1).evaluate((n) => getComputedStyle(n).backgroundColor)
+  ok('[다시 열기] 표 칸 채우기(cbg)가 그대로다', cbg2 === 'rgb(253, 240, 240)', cbg2)
+  const ratio2 = await cw()
+  ok('[다시 열기] 열 너비(colw)가 그대로다', Math.abs(ratio2 - ratio) < 0.02, `${ratio.toFixed(3)} → ${ratio2.toFixed(3)}`)
 }])
 
 for (const [name, run] of STAGES) {

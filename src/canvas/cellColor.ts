@@ -30,3 +30,25 @@ export function cellTextColor(bg: string | undefined): string | undefined {
 export function cellBackground(bg: string | undefined): string | undefined {
   return bg || undefined
 }
+
+/**
+ * **표 칸 채우기에 쓰는 자유 색 여덟**(EVER-SKETCH1 b1911d3 `CBG_FREE`).
+ *
+ * 원본에서는 칸 색 목록을 표준 양식 슬롯에서만 내주다 보니, 양식 없는 표에서는 칸 색을
+ * 바꿀 **길이 아예 없었다** — 자료에도 `cbg` 가 있고 화면도 그리는데. 그래서 슬롯과 상관없는
+ * 자유 색을 두었다. 이 저장소에는 슬롯이 없으므로 **이것이 곧 전부**다.
+ *
+ * 글자는 늘 진한 잉크색이므로 **옅은 색만** 둔다(대비를 지키려고). 짙은 색은 고르개의
+ * 일반 팔레트로 고르고, 그때는 `cellTextColor` 가 글자를 흰색으로 돌린다.
+ */
+export const CBG_FREE: string[] = [
+  '#FFFFFF', '#F1F3F6', '#EAF0FF', '#E9F5EF', '#FFF4E3', '#FDF0F0', '#EEF2FA', '#F6F0FF',
+]
+
+/**
+ * 표에서 쓸 수 있는 칸 색 목록 — **한 군데서 정한다.** 도구줄과 오른쪽 패널이 같은 함수를 부른다.
+ * (원본은 `cellColors(slot)` 로 양식 색을 앞에 세운다. 이 저장소는 슬롯이 없어 자유 색만 낸다.)
+ */
+export function cellColors(): string[] {
+  return CBG_FREE
+}

@@ -20,7 +20,8 @@
 //   같은 칸을 누르면  → 글자 사이로 커서 이동(브라우저에 맡긴다).
 //   다른 칸을 누르면  → 값 커밋 + 편집 끄기 + 그 칸 고르기 + 끌면 범위 선택.
 //
-// ebook_html 이식(EVER-SKETCH1 미커밋 · 2026-09-21): 원본 그대로, `adding` 검사 한 줄만 뺐다(아래 주석).
+// ebook_html 이식(EVER-SKETCH1 미커밋 · 2026-09-21): 원본 그대로. 3단계에서 잠시 뺐던 `adding` 검사는
+// 4단계(EVER-SKETCH1 46f155c 도형 도구를 든 손)가 들어오면서 되살렸다.
 //
 // 실행: node --experimental-strip-types --import ./ts_register.mjs table_edit_exit.test.mjs
 import { readFileSync } from 'node:fs'
@@ -45,9 +46,8 @@ const i = fl.indexOf('if (editingThis) {')
 const blk = i < 0 ? '' : fl.slice(i, i + 1200)
 {
   check(i > 0, '표 칸의 onPointerDown 에 편집 중 갈래가 있다')
-  // (ebook_html 이식) 원본은 여기서 `if (adding) return`(도형 도구를 든 손 · EVER-SKETCH1 46f155c)이
-  // 이 갈래 앞에 남아 있는지도 본다. 그 기능은 아직 이 저장소에 없다(4단계 「고르면 바로 놓기」 몫)라
-  // 이 한 줄만 뺀다. 4단계에서 들어오면 되살린다.
+  check(/if \(adding\) return/.test(fl.slice(Math.max(0, i - 220), i)),
+    '도형을 놓는 중이면 여전히 흘려보낸다 — 그 앞줄을 밀어내지 않았다')
 }
 
 // ── ③ 같은 칸은 건드리지 않는다 ───────────────────────

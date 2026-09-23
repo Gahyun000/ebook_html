@@ -1,0 +1,206 @@
+// **편집기 도구가 제자리에 있는가.**
+//
+// 2026-09-16 · 사용자가 「EVER-SKETCH 기획·설계 사상」 12쪽을 손으로 만들 수 있는지
+// 물었다. 재료는 다 넣을 수 있었다 — 막히는 것은 「그 색을 어디서 바꾸나」였다.
+// 그 문서를 세어 보니 **채우기 56개 · 테두리 색 16개 · 칸 색 1개**를 쓰는데,
+// 위 도구줄에는 **글자 색밖에** 없었다.
+//
+// 넷을 고쳤다.
+//   ① 채우기·테두리를 도구줄로 — 하루에 수십 번 하는 일이 두 번째로 깊은 자리에 있었다
+//   ② 보통 표에도 칸 색 — 기능이 없던 게 아니라 **가려져** 있었다
+//   ③ 정렬 아이콘을 파워포인트·한글 그림으로 — 전에는 유니코드 **글자**였다
+//   ④ 메뉴의 「삽입 → 도형」이 도형 팝업을 열게 — 사각형 하나만 넣고 있었다
+//
+// ebook_html 이식(4단계 · EVER-SKETCH1 b1911d3 · 8513fe1 · 73b6825 · 8927a75 + 5a4afce):
+// 이 저장소에는 **표준 양식 슬롯이 없다**(slots.ts · CBG_LABEL · cbgPalette 없음). 그래서
+//   · 칸 색 목록은 `src/canvas/cellColor.ts` 의 `CBG_FREE` / `cellColors()` 를 본다(슬롯 인자 없음)
+//   · 슬롯 표 전용 검사(양식 색이 앞에 선다 · slotAllows · CBG_LABEL · 「진행 표시」 이름)는 뺐다 — 자리마다 주석
+//   · 오른쪽 패널은 아직 옛 탭 모양이라(5단계에서 묶음으로 바뀐다) 패널 쪽은 **같은 뜻을 지금 모양으로** 본다
+// 5a4afce(그리기 도구 접기)의 원래 시험은 e2e 뿐이라 ⑦ 을 새로 붙였다.
+//
+// 실행: node --experimental-strip-types --import ./ts_register.mjs editor_tools.test.mjs
+import { readFileSync } from 'node:fs'
+
+let pass = 0, fail = 0
+const check = (cond, label, extra = '') => {
+  if (cond) { pass++; console.log('✓ ' + label) }
+  else { fail++; console.log('✗ ' + label + (extra ? '  — ' + extra : '')) }
+}
+const read = (p) => readFileSync(p, 'utf8')
+const bare = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\{\/\*[\s\S]*?\*\/\}/g, '')
+  .replace(/^\s*\/\/.*$/gm, '')
+
+const tb = bare(read('./src/builder/chrome/EditToolbar.tsx'))
+const rp = bare(read('./src/builder/chrome/RightPanel.tsx'))
+const menu = bare(read('./src/builder/chrome/MenuBar.tsx'))
+const model = bare(read('./src/canvas/model.ts'))
+const free = bare(read('./src/canvas/FreeLayer.tsx'))
+const icons = bare(read('./src/ui/alignIcons.tsx'))
+const cp = bare(read('./src/builder/chrome/ColorPicker.tsx'))
+
+const { NO_FILL } = await import('./src/canvas/model.ts')
+const { cellColors, CBG_FREE } = await import('./src/canvas/cellColor.ts')
+// JSX 가 든 파일은 검사 실행기가 못 읽는다 — 그래서 **말은 따로** 둔다.
+const { ALIGN_LABEL, VALIGN_LABEL } = await import('./src/ui/alignLabels.ts')
+
+// ── ① 채우기·테두리가 도구줄에 ────────────────────
+//
+// **2026-09-16(둘째) · `FillTools` 라는 이름이 없어졌다.** 사용자가 「파워포인트는
+// 채우기·테두리·글씨 색이 나눠져 있다」고 해서, 한 묶음에 들어 있던 것을 **이름 붙은 셋**
+// 으로 쪼갰다(`InkTools` / `InkBtn`). 이 검사는 옛 이름을 그대로 박아 두어 깨졌으므로
+// **지우지 않고 새 모양으로 고쳐 쓴다** — 지키려던 것(도구줄에서 채우기·테두리를
+// 바꿀 수 있고, 속 없는 갈래에는 안 뜬다)은 그대로 본다. 자세한 것은 toolbar_ink.test.mjs.
+check(/function InkTools/.test(tb), '도구줄에 채우기·테두리 묶음이 있다')
+check(/<InkTools \/>/.test(tb), '그 묶음이 실제로 그려진다')
+{
+  const ft = tb.slice(tb.indexOf('function InkTools'))
+  check(/patch\(\{ color: c \}\)/.test(ft), '채우기를 바꾼다')
+  check(/patch\(\{ borderColor: c \}\)/.test(ft), '테두리 색을 바꾼다')
+  check(/allowTransparent/.test(ft), '채우기는 **없앨 수도** 있다')
+  check(/NO_FILL\.includes\(el\.type\)/.test(ft),
+    '속이 없는 갈래에는 안 띄운다 — 그 판단을 제 손으로 안 한다')
+}
+// **목록이 한 벌이어야 한다.** 캔버스와 도구줄이 각자 들면 한쪽에서만 칠해지는 갈래가 생긴다.
+check(/export const NO_FILL/.test(model), 'NO_FILL 을 한 군데서 정한다')
+check(!/const NO_FILL = \[/.test(free), '캔버스가 제 목록을 따로 안 든다')
+check(NO_FILL.includes('table') && NO_FILL.includes('text'),
+  '표와 글상자는 채우기 대상이 아니다 (표는 칸마다 색이 따로다)')
+
+// ── ② 보통 표에도 칸 색 ───────────────────────────
+check(cellColors(undefined).length > 0, '양식 없는 표에도 쓸 색이 있다')
+check(cellColors(undefined) === CBG_FREE || cellColors(undefined).join() === CBG_FREE.join(),
+  '양식이 없으면 자유 색만')
+// (ebook_html) 「양식 표는 양식 색이 앞에 선다 · 뒤에 자유 색 · 겹침 없음」 세 검사는 뺐다 —
+// 표준 양식 슬롯(cbgPalette)이 이 저장소에 없다. 대신 자유 색 자체를 잰다.
+check(CBG_FREE.length === 8 && new Set(CBG_FREE).size === 8, '자유 색은 여덟, 겹침 없음')
+check(CBG_FREE.every((c) => /^#[0-9A-F]{6}$/.test(c)), '모두 #RRGGBB 다')
+// (ebook_html) 원본은 `cellColors(slot)` 을 본다 — 슬롯이 없으니 인자 없이 부른다.
+check(/cellColors\(\)\.map/.test(rp), '화면이 그 답을 쓴다 — 제 손으로 안 가른다')
+check(/es-cbg-more/.test(rp), '목록에 없는 색도 고를 수 있다')
+// (ebook_html) 원본은 묶음 이름이 표에 따라 갈리는지(`palette ? '진행 표시 · 채우기' : '채우기'`) 본다.
+// 슬롯이 없어 이름은 늘 「채우기」 하나다 — 그 이름이 **표 탭 안에** 붙었는지를 본다.
+{
+  const i = rp.indexOf("tab === 'table' && el.type === 'table'")
+  const tab = i < 0 ? '' : rp.slice(i, rp.indexOf("tab === 'style'", i))
+  check(/className="insp-sec">채우기/.test(tab), '표 탭에 「채우기」 묶음이 있다')
+  check(!/'칸 색'|>칸 색</.test(rp), '옛 이름 「칸 색」이 패널에 안 남아 있다')
+  check(/setCellBgRange\(el, ts\.r0, ts\.c0, ts\.r1, ts\.c1, color\)/.test(tab), '패널도 고른 범위 전체를 칠한다')
+  check(/setCellBgRange\(el, ts\.r0, ts\.c0, ts\.r1, ts\.c1, null\)/.test(tab), '패널에도 지우는 길이 있다')
+}
+
+// ── ③ 정렬은 글자가 아니라 그림 ───────────────────
+check(/export function AlignIcon/.test(icons) && /export function VAlignIcon/.test(icons),
+  '정렬 아이콘이 그림이다')
+check(/<svg/.test(icons) && /<rect/.test(icons), '실제로 SVG 를 그린다')
+for (const [where, src] of [['도구줄', tb], ['표 패널', rp]]) {
+  check(/AlignIcon/.test(src), `${where}: 그 그림을 쓴다`)
+  check(!/['"`]⇤['"`]|['"`]⇔['"`]|['"`]⇥['"`]|['"`]⤒['"`]|['"`]⇕['"`]|['"`]⤓['"`]/.test(src),
+    `${where}: 유니코드 글자가 안 남아 있다`)
+  // (ebook_html) 이 저장소의 패널은 글자를 따옴표가 아니라 JSX 글(`>⇤<`)로 박아 두었다 —
+  // 위 검사로는 안 잡혀서 **더 넓게** 한 번 더 본다.
+  check(!/[⇤⇔⇥⤒⇕⤓]/.test(src), `${where}: 어떤 모양으로도 정렬 글자가 안 남아 있다`)
+}
+// **말도 맞춘다.** 「세로 가운데」는 한글·파워포인트에서 「가운데 맞춤」이다.
+check(VALIGN_LABEL.middle === '가운데 맞춤', '「세로 가운데」가 아니라 「가운데 맞춤」')
+check(ALIGN_LABEL.center === '가운데 맞춤', '가로도 같은 말을 쓴다')
+check(!/세로 가운데/.test(rp), '옛 말이 안 남아 있다')
+
+// ── ④ 삽입 메뉴가 도형 팝업을 연다 ────────────────
+check(/emit\('ebook:pick-shape'\)/.test(menu), '메뉴가 팝업을 부른다')
+check(!/tool\('box'\)/.test(menu), '사각형 하나만 넣던 길이 없다')
+check(/'ebook:pick-shape'/.test(tb) && /addEventListener\('ebook:pick-shape'/.test(tb),
+  '도구줄이 그 부름을 받는다')
+check(/removeEventListener\('ebook:pick-shape'/.test(tb), '떠날 때 귀를 닫는다')
+// 목록을 메뉴에 복사하지 않는다 — 두 벌이 되면 도형을 하나 더할 때 한쪽만 는다.
+check(!/diamond|hexagon|parallelogram/.test(menu), '도형 목록이 메뉴에 복사돼 있지 않다')
+
+// ── ⑤ 표 채우기도 도구줄에서 ────────────────────
+//
+// 2026-09-16 · ②를 하고 나서 사용자가 「표도 상단에서 가능하게」라고 했다. 맞는 말이다:
+// 도형은 도구줄에서 바로 칠하는데 표만 오른쪽 패널을 열어야 하면, 같은 일을 하는 길이
+// 둘로 갈라진다. 표는 요소 하나가 아니라 **고른 칸 범위**에 칠하므로 채우기(`NO_FILL`)
+// 옆이 아니라 **표 도구 옆** — 병합과 같은 「고른 칸에 하는 일」 자리에 둔다.
+//
+// 그다음 사용자가 또 물었다 — 「표는 채우기가 아니라 칸 색으로 따로 뺀 거냐」.
+// 이름이 갈려 있으니 나온 물음이다. **이름을 「채우기」로 맞췄다.** 그림만 표 칸 모양으로
+// 남긴다 — 무엇에 칠하는지는 그림이 말한다.
+//
+// **「칸을 안 골랐으면 표 전체」는 넣지 않기로 했다**(사용자 판단). 한 번 그렇게 가기로
+// 했다가 물렀다: 칠하는 규칙은 「끌어 고른 데를 칠한다」 하나로 족하고, 표 전체는 왼쪽
+// 위에서 오른쪽 아래까지 끌면 된다. 규칙을 하나 더 만들면 「머리글도 덮나」가 딸려 온다.
+{
+  const tt = tb.slice(tb.indexOf('function TableTools'), tb.indexOf('export default function EditToolbar'))
+  check(tt.length > 100, '표 도구 묶음을 찾았다')
+  check(/<span className="lab">채우기<\/span>/.test(tt), '도구줄 표 묶음 이름이 「채우기」다')
+  check(!/className="lab">칸 색/.test(tt), '옛 이름 「칸 색」이 도구줄에 안 남아 있다')
+  // **있다고만 보면 안 된다** — 2026-09-16, 묶음을 `{false ? (` 로 꺼 보니
+  // 이 검사가 그대로 통과했다. 글자는 파일에 남아 있는데 화면엔 안 나온다.
+  // 그래서 **실제로 그려지는 자리**를 본다: `canCbg` 로 갈라진 바로 그 안이어야 한다.
+  // (ebook_html) 원본은 `{canCbg ? (` 안을 본다. 슬롯이 없어 이 갈래가 없다 — 표를 고른 뒤의
+  // **마지막 return 안**에 있는지를 본다(`{false ? (` 로 꺼 두는 식의 속임은 여기서도 막힌다).
+  {
+    const ret = tt.slice(tt.lastIndexOf('return ('))
+    check(/<span className="lab">채우기<\/span>/.test(ret) && !/\{false \?/.test(ret), '그 묶음이 실제로 그려진다')
+  }
+  check(/setCellBgRange\(table,/.test(tt), '고른 칸 범위에 칠한다')
+  // 마찬가지로, 범위를 한 칸으로 줄여 보니 통과했다 — **지우는 줄**이 대신 걸렸던 것이다.
+  // 칠하는 줄(`, c)`)과 지우는 줄(`, null)`)을 따로 못 박는다.
+  check(/setCellBgRange\(table, ts\.r0, ts\.c0, ts\.r1, ts\.c1, c\)/.test(tt),
+    '한 칸이 아니라 끌어 고른 범위 전체를 칠한다')
+  // **칠하는 길과 지우는 길은 짝이다.** 칸 채우기는 「없음」이 정상 상태라, 지우는 길이
+  // 없으면 한 번 칠한 칸을 되돌릴 수 없다.
+  check(/onClear=/.test(tt), '지우는 길이 같이 있다')
+  check(/setCellBgRange\(table, ts\.r0, ts\.c0, ts\.r1, ts\.c1, null\)/.test(tt),
+    '지우기도 고른 범위 전체를 null 로 지운다')
+  // 칸을 안 고르면 칠할 대상이 없다 — 막되, **감추지 않는다**.
+  check(/disabled=\{!ts\}/.test(tt), '칸을 안 골랐으면 못 누른다')
+  check(/cbgWhy/.test(tt), '왜 못 누르는지 말해 준다')
+  // 판단을 두 번 적지 않는다: 쓸 수 있는지도, 색 목록도 슬롯 정책 한 곳에서 온다.
+  // (ebook_html) 「양식이 막은 표에서는 안 뜬다」(slotAllows) 는 뺐다 — 슬롯이 없다.
+  check(/cellColors\(\)/.test(tt), '색 목록을 제 손으로 적지 않는다')
+  check(!/#[0-9A-Fa-f]{6}/.test(tt), '색을 도구줄에 직접 박아 두지 않았다')
+  // 양식 표의 앞 색은 **뜻**이다. 그 이름이 고르개에 같이 가야 한다.
+  // (ebook_html) 「양식 색 이름을 같이 보낸다(CBG_LABEL)」 · 「진행 표시 · 채우기」 두 검사는 뺐다 —
+  // 양식 색도 그 이름표도 이 저장소에 없다. 앞줄 이름은 그냥 「채우기」다.
+  check(/head=\{\{ lab: '채우기', colors: cellColors\(\) \}\}/.test(tt), '고르개 앞줄에 자유 색 여덟을 깐다')
+  // **칸을 안 골랐을 때 표 전체로 번지지 않는다.** 규칙은 「끌어 고른 데를 칠한다」 하나다.
+  check(/disabled=\{!ts\}/.test(tt) && !/표 전체/.test(tt),
+    '칸을 안 골랐으면 잠긴다 — 표 전체로 번지는 길이 없다')
+}
+// 패널과 도구줄이 **같은 함수**를 쓴다 — 한쪽만 고쳐지는 일을 막는다.
+check(/setCellBgRange/.test(rp) && /setCellBgRange/.test(tb), '패널과 도구줄이 같은 길로 칠한다')
+check(/cellColors\(/.test(rp) && /cellColors\(/.test(tb), '색 목록도 같은 데서 온다')
+
+// 고르개가 「이 자리에서 쓰는 색」을 맨 위에 따로 깐다 — 일반 팔레트는 그대로 남는다.
+check(/head\?:/.test(cp), '고르개가 앞줄을 받는다')
+check(/head\.colors\.map/.test(cp), '그 색들을 그린다')
+check(/head\.titles/.test(cp), '이름도 같이 보여 준다')
+check(/팔레트/.test(cp), '일반 팔레트를 없애지 않았다')
+check(/onClear/.test(cp) && /색 지우기/.test(cp), '지우는 단추가 있다')
+check(/disabled=\{disabled\}/.test(cp), '못 쓰는 상태를 받는다')
+{
+  // 앞줄이 팔레트보다 **위**에 있어야 한다. 아래로 밀리면 약속된 색이 안 보인다.
+  const iHead = cp.indexOf('head.colors.map')
+  const iPal = cp.indexOf('PALETTE.map')
+  check(iHead > 0 && iPal > 0 && iHead < iPal, '앞줄이 일반 팔레트보다 위에 있다')
+}
+
+// ── ⑦ 그리기 도구를 하나로 접는다 (EVER-SKETCH1 5a4afce) ─────
+// 펜·형광펜·지우개는 각자 두께와 색을 달고 있어 첫 줄을 **열다섯 칸** 차지했다.
+// 접어 두고, **그리는 중에는 저절로 편다** — 고른 것이 아니라 하고 있는 일이 정한다.
+{
+  check(/const \[drawOpen, setDrawOpen\] = useState\(false\)/.test(tb), '처음엔 접혀 있다')
+  check(/const drawing = tool === 'pen' \|\| tool === 'highlighter' \|\| tool === 'eraser'/.test(tb),
+    '그리는 중인지를 도구로 안다')
+  check(/const showDraw = drawOpen \|\| drawing/.test(tb), '그리는 중이면 저절로 펴 둔다')
+  check(/\{!drawing && \(\s*<button className="tbtn draw-toggle"/.test(tb), '접기 단추는 안 그릴 때만 보인다')
+  check(/aria-expanded=\{drawOpen\}/.test(tb), '펼침 상태를 알린다')
+  const i = tb.indexOf('{showDraw && (<>')
+  const blk = i < 0 ? '' : tb.slice(i, tb.indexOf('</>)}', i))
+  check(i > 0 && /title="펜 두께"/.test(blk) && /title="형광펜 두께"/.test(blk) && /title="지우개 크기"/.test(blk),
+    '펜·형광펜·지우개 칸이 모두 그 안에 들어갔다')
+  check(!/selEl|tableSel/.test(blk), '고른 것에 따라 접었다 폈다 하지 않는다')
+}
+
+console.log(`\n${pass} passed, ${fail} failed`)
+if (fail) process.exit(1)

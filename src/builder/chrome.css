@@ -368,3 +368,62 @@
   font-size:11px;color:#5b6270;padding:0 4px;font-variant-numeric:tabular-nums;
   display:inline-block;width:184px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
 }
+
+/* ── 4단계 이식(EVER-SKETCH1 b1911d3 · 8513fe1 · 8927a75 · f586a7b · 5a4afce) ──────────── */
+
+/* 도구줄의 표 채우기 — 아이콘이 무엇의 색인지를 말한다. 아이콘과 색을 한 덩어리로 묶는다. */
+.ax-cp { display: inline-flex; align-items: center; gap: 3px; padding: 0 2px;
+  color: #5b6270; }
+.ax-cp .cp-trig { width: 18px; height: 18px; }
+/* 고른 칸이 없을 때. **감추지 않고 흐린다** — 왜 못 쓰는지는 title 이 말해 준다. */
+.ax-cp .cp-trig:disabled { opacity: .4; cursor: default; }
+
+/* 정렬 아이콘 — 글자가 아니라 그림이다(파워포인트·한글과 같은 모양). */
+.al-ic { display: block; }
+
+/* ── 색 단추: 그림 + 지금 색 띠 + ▾ ──────────────────────────
+   파워포인트와 같은 모양이다. 띠가 **마지막에 쓴 색**을 보여 주고, 단추를 그냥 누르면
+   그 색이 칠해진다. ▾ 는 고르개만 연다. */
+.ax-ink { display: inline-flex; flex-direction: column; align-items: center; gap: 2px;
+  border: 1px solid transparent; border-radius: 6px; background: #fff;
+  padding: 2px 4px 3px; cursor: pointer; color: #3a4152; }
+.ax-ink:hover { background: #F2F4F8; }
+.ax-ink svg { display: block; }
+.ax-inkbar { display: block; width: 16px; height: 4px; border-radius: 1px;
+  border: 1px solid rgba(0,0,0,.12); }
+.cp-trig.cp-caret { width: 14px; height: 18px; border: 0; background: transparent;
+  font-size: 9px; line-height: 1; color: #5b6270; padding: 0; }
+.cp-trig.cp-caret:hover { color: #2462EB; }
+
+/* ── 좁으면 **이름표만 접는다** ──────────────────────────────
+   도구줄은 넘치면 다음 줄로 내려간다(flex-wrap). 좁아지면 **이름표만 숨긴다** — 그림과
+   단추는 그대로라 쓸 수 있는 도구가 줄지 않고, 이름은 올려 보면 뜬다(묶음마다 title).
+   **자바스크립트로 「넘치면」을 재지 않는다.** 이름을 숨기면 폭이 줄어 다시 들어가고,
+   들어가면 이름을 도로 띄우다가 또 넘친다. 컨테이너 질의는 줄 자신의 폭만 보므로 진동이 없다. */
+.ax-tbrow { container-type: inline-size; }
+@container (max-width: 1240px) {
+  .ax-tbrow .ax-grp > .lab { display: none; }
+}
+
+/* 「그리기」 접기 단추 — 펜·형광펜·지우개 열다섯 칸을 하나로. 그리는 중에는 저절로 펴진다. */
+.tbtn.draw-toggle{display:inline-flex;align-items:center;gap:4px}
+
+/* 표 칸 채우기 견본(오른쪽 패널) — EVER-SKETCH1 template.css 의 es-cbg 를 옮겼다. */
+.es-cbg-row { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.es-cbg {
+  width: 22px; height: 20px; border-radius: 4px; cursor: pointer;
+  border: 1px solid rgba(15, 27, 61, .14); padding: 0;
+}
+.es-cbg:disabled { opacity: .45; cursor: default; }
+.es-cbg.on { outline: 2px solid #2462EB; outline-offset: 1px; }
+.es-cbg.clear {
+  background: #fff; font-size: 11px; color: #6b7480; width: 26px;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+/* 「다른 색」 — 목록에 없는 색을 고르는 자리. 네모들과 크기를 맞춘다. */
+.es-cbg-more { display: inline-flex; align-items: center; }
+.es-cbg-more .cp-trig { width: 22px; height: 20px; border-radius: 4px; }
+
+/* 글자 크기 숫자는 폭을 좁게 둔다(이식하며 덧붙임). `.tbtn-hint` 의 184px 고정 폭은 끄는 도중
+   바뀌는 **표 안내 문구**를 위한 것이라, 두 자리 숫자에 걸면 − 와 ＋ 사이가 크게 벌어진다. */
+.ax-tb .tbtn-hint.fs-val{width:auto;min-width:22px;text-align:center}

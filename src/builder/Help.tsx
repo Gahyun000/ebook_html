@@ -23,7 +23,7 @@ function shortcuts(K: (s: string) => string): { k: string; d: string }[] {
     { k: 'V R O D T S I C P', d: '도구 전환(선택·사각형·원·마름모·글자·스티키·이미지·연결·펜)' },
     { k: 'PageUp / PageDown', d: '이전 / 다음 페이지' },
     // 목록 안에서만 듣는 키라, **여기 안 적으면 아무도 모른다**(EVER-SKETCH1 1219bbd).
-    { k: '↑ ↓ · Enter', d: '슬라이드 목록에서 — 위아래로 옮기기 · 새 슬라이드(맨 끝)' },
+    { k: '↑ ↓ · Enter', d: '슬라이드 목록에서 — 위아래로 옮기기 · 새 슬라이드(고른 것 바로 뒤)' },
     { k: K('mod+S'), d: '저장' },
     { k: K('mod+enter'), d: '이북(웹) 만들기' },
     { k: `${K('mod+shift+P')} · F5`, d: '발표 시작' },

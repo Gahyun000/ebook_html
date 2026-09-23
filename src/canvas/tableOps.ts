@@ -282,6 +282,26 @@ export function setAlignRange(el: FreeEl, r0: number, c0: number, r1: number, c1
   return { calign }
 }
 
+/**
+ * 고른 칸 범위의 **채우기**(칸 색 `cbg`)를 바꾼다 — EVER-SKETCH1 b721df0 그대로.
+ * 도구줄(표 → 채우기)과 오른쪽 패널(표 탭 → 채우기)이 **같은 함수**로 칠한다.
+ */
+export function setCellBgRange(el: FreeEl, r0: number, c0: number, r1: number, c1: number,
+                               color: string | null): Partial<FreeEl> {
+  const R0 = Math.min(r0, r1), C0 = Math.min(c0, c1), R1 = Math.max(r0, r1), C1 = Math.max(c0, c1)
+  const cbg: CellMap<string> = { ...(el.cbg || {}) }
+  for (let r = R0; r <= R1; r++) for (let c = C0; c <= C1; c++) {
+    // null 이면 지운다 — 빈 문자열을 남기면 "칠했는데 투명"이라는 애매한 상태가 된다.
+    if (color) cbg[key(r, c)] = color
+    else delete cbg[key(r, c)]
+  }
+  return { cbg }
+}
+
+export function cellBg(el: FreeEl, r: number, c: number): string | undefined {
+  return el.cbg ? el.cbg[key(r, c)] : undefined
+}
+
 export function setVAlignRange(el: FreeEl, r0: number, c0: number, r1: number, c1: number, valign: VAlign): Partial<FreeEl> {
   const R0 = Math.min(r0, r1), C0 = Math.min(c0, c1), R1 = Math.max(r0, r1), C1 = Math.max(c0, c1)
   const cvalign: CVAlign = { ...(el.cvalign || {}) }

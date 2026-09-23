@@ -11,7 +11,9 @@ import { PAPER_OPTIONS } from '../../cards/paper'
 import { FCOLORS } from '../../canvas/model'
 import { pushSnap } from '../../canvas/model'
 import type { FreeEl } from '../../state/store'
-import { addRow, delRow, addCol, delCol, mergeRange, unmergeAt, setAlignRange, setVAlignRange, setCellFsRange } from '../../canvas/tableOps'
+import { addRow, delRow, addCol, delCol, mergeRange, unmergeAt, setAlignRange, setVAlignRange, setCellFsRange, setCellBgRange } from '../../canvas/tableOps'
+import { cellBackground, cellColors } from '../../canvas/cellColor'
+import { ALIGN_LABEL, AlignIcon, VALIGN_LABEL, VAlignIcon } from '../../ui/alignIcons'
 
 const TRANS: [string, string][] = [['', '없음'], ['fade', '페이드'], ['slide', '밀기'], ['zoom', '확대'], ['flip', '넘기기']]
 const cap: React.CSSProperties = { fontSize: 11, color: '#98a1b2', display: 'block', marginTop: 6 }
@@ -203,15 +205,19 @@ export default function RightPanel() {
                 <button className="insp-pill" onClick={() => patchTable(unmergeAt(el, ar, ac))}>병합 해제</button>
               </div>
               <div className="insp-sec">셀 정렬{selCount > 1 ? ` (${selCount}칸)` : ''}</div>
+              {/* **그림도 말도 파워포인트·한글을 따른다**(EVER-SKETCH1 b1911d3). 전에는
+                  유니코드 글자(⇤ ⇔ ⇥ ⤒ ⇕ ⤓)였다 — 글꼴마다 모양이 달라지고 매번 눌러 봐야 알았다. */}
               <div className="insp-row seg">
-                <button title="왼쪽" onClick={() => patchTable(setAlignRange(el, ...rng(), 'left'))}>⇤</button>
-                <button title="가운데" onClick={() => patchTable(setAlignRange(el, ...rng(), 'center'))}>⇔</button>
-                <button title="오른쪽" onClick={() => patchTable(setAlignRange(el, ...rng(), 'right'))}>⇥</button>
+                {(['left', 'center', 'right'] as const).map((d) => (
+                  <button key={d} title={ALIGN_LABEL[d]}
+                    onClick={() => patchTable(setAlignRange(el, ...rng(), d))}><AlignIcon dir={d} /></button>
+                ))}
               </div>
               <div className="insp-row seg">
-                <button title="위" onClick={() => patchTable(setVAlignRange(el, ...rng(), 'top'))}>⤒</button>
-                <button title="세로 가운데" onClick={() => patchTable(setVAlignRange(el, ...rng(), 'middle'))}>⇕</button>
-                <button title="아래" onClick={() => patchTable(setVAlignRange(el, ...rng(), 'bottom'))}>⤓</button>
+                {(['top', 'middle', 'bottom'] as const).map((d) => (
+                  <button key={d} title={VALIGN_LABEL[d]}
+                    onClick={() => patchTable(setVAlignRange(el, ...rng(), d))}><VAlignIcon dir={d} /></button>
+                ))}
               </div>
               <div className="insp-sec">셀 글자 크기</div>
               <div className="insp-row">
@@ -220,11 +226,47 @@ export default function RightPanel() {
                     onCommit={(n) => patchTable(setCellFsRange(el, ...rng(), n))} /></label>
                 <button className="insp-pill" onClick={() => patchTable(setCellFsRange(el, ...rng(), null))}>표 기본으로</button>
               </div>
+              {/* **보통 표에도 채우기**(EVER-SKETCH1 b1911d3 · 73b6825). 칸 색(`cbg`)은 자료에도 있고
+                  화면도 그리는데 바꿀 길이 없었다. 이름은 도구줄·도형과 같은 「채우기」다 —
+                  같은 일에 이름이 둘이면 「표는 채우기랑 다른 거냐」는 물음이 나온다.
+                  (원본의 양식 표 「진행 표시」 색·이름표는 이 저장소에 없다 — 자유 색 여덟만.) */}
+              <div className="insp-sec">채우기</div>
+              <div className="insp-row es-cbg-row">
+                {cellColors().map((color) => (
+                  <button key={color} type="button"
+                    className={'es-cbg' + (ts && el.cbg && el.cbg[Math.min(ts.r0, ts.r1) + '_' + Math.min(ts.c0, ts.c1)] === color ? ' on' : '')}
+                    style={{ background: cellBackground(color) }}
+                    title={color}
+                    disabled={!ts}
+                    onClick={() => { if (ts) patchTable(setCellBgRange(el, ts.r0, ts.c0, ts.r1, ts.c1, color)) }} />
+                ))}
+                <button type="button" className="es-cbg clear" title="색 지우기" disabled={!ts}
+                  onClick={() => { if (ts) patchTable(setCellBgRange(el, ts.r0, ts.c0, ts.r1, ts.c1, null)) }}>✕</button>
+                {/* 목록에 없는 색도 쓴다 — 여기만 막아 두면 「그 색은 왜 안 되나」가 된다. */}
+                <span className="es-cbg-more" title="다른 색">
+                  <ColorPicker value={ts && el.cbg ? el.cbg[Math.min(ts.r0, ts.r1) + '_' + Math.min(ts.c0, ts.c1)] : undefined}
+                    disabled={!ts}
+                    onChange={(c) => { if (ts) patchTable(setCellBgRange(el, ts.r0, ts.c0, ts.r1, ts.c1, c)) }} />
+                </span>
+              </div>
+              <div className="insp-hint">칸을 끌어 여러 칸을 한 번에 칠할 수 있어요. 위 도구줄의 <b>채우기</b>도 같은 일을 합니다.</div>
               <div className="insp-sec">테두리 · 헤더</div>
               <div className="insp-row">
                 <ColorPicker value={el.borderColor || '#cfd5e2'} onChange={(c) => patchTable({ borderColor: c })} />
                 <select className="insp-sel" style={{ width: 'auto' }} value={el.borderWidth ?? 1} onChange={(e) => patchTable({ borderWidth: Number(e.target.value) })}>
+                  {/* **「없음」을 넣는다**(EVER-SKETCH1 8927a75). 도형은 테두리를 없앨 수 있는데 표만
+                      얇게/보통/굵게뿐이라, 선 없는 표를 만들 길이 아예 없었다.
+                      0 이면 그리는 쪽에서 `0px solid` 가 되어 선이 사라진다. */}
+                  <option value={0}>없음</option>
                   <option value={0.5}>얇게</option><option value={1}>보통</option><option value={2}>굵게</option>
+                </select>
+                {/* 선 모양 — 도구줄의 도형 테두리와 **같은 값**(`borderDash` · EVER-SKETCH1 f586a7b)을 쓴다. */}
+                <select className="insp-sel" style={{ width: 'auto' }} title="선 모양"
+                  value={el.borderDash || 'solid'}
+                  onChange={(e) => patchTable({ borderDash: e.target.value as 'solid' | 'dashed' | 'dotted' })}>
+                  <option value="solid">실선</option>
+                  <option value="dashed">파선</option>
+                  <option value="dotted">점선</option>
                 </select>
                 <label className="insp-check"><input type="checkbox" checked={el.headRow !== false} onChange={(e) => patchTable({ headRow: e.target.checked })} /> 헤더행</label>
               </div>
@@ -245,7 +287,7 @@ export default function RightPanel() {
               <div className="insp-row"><ColorPicker value={el.color} onChange={(c) => patch({ color: c })} allowTransparent /><span style={{ fontSize: 12, color: '#5b6270' }}>도형 색</span></div>
               <div className="insp-sw">{FCOLORS.map((c) => (<span key={c} className={'insp-chip' + (el.color === c ? ' on' : '')} style={{ background: c === 'transparent' ? 'repeating-conic-gradient(#ccc 0 25%,#fff 0 50%) 50%/8px 8px' : c }} onClick={() => patch({ color: c })} />))}</div>
               <div className="insp-sec">테두리</div>
-              <div className="insp-row"><ColorPicker value={el.borderColor || '#cfd5e2'} onChange={(c) => patch({ borderColor: c })} allowTransparent /><select className="insp-sel" style={{ width: 'auto' }} value={el.borderWidth ?? 1.5} onChange={(e) => patch({ borderWidth: Number(e.target.value) })}><option value={0}>없음</option><option value={1}>얇게</option><option value={1.5}>보통</option><option value={3}>굵게</option></select></div>
+              <div className="insp-row"><ColorPicker value={el.borderColor || '#cfd5e2'} onChange={(c) => patch({ borderColor: c })} allowTransparent /><select className="insp-sel" style={{ width: 'auto' }} value={el.borderWidth ?? 1.5} onChange={(e) => patch({ borderWidth: Number(e.target.value) })}><option value={0}>없음</option><option value={1}>얇게</option><option value={1.5}>보통</option><option value={3}>굵게</option></select><select className="insp-sel" style={{ width: 'auto' }} title="선 모양" value={el.borderDash || 'solid'} onChange={(e) => patch({ borderDash: e.target.value as 'solid' | 'dashed' | 'dotted' })}><option value="solid">실선</option><option value="dashed">파선</option><option value="dotted">점선</option></select></div>
               <div className="insp-sec">불투명도</div>
               <div className="insp-row"><input className="insp-range" type="range" min={0} max={100} value={Math.round((el.opacity ?? 1) * 100)} onChange={(e) => patch({ opacity: Number(e.target.value) / 100 })} /><span style={{ fontSize: 12, color: '#5b6270', width: 42, textAlign: 'right' }}>{Math.round((el.opacity ?? 1) * 100)}%</span></div>
               <div className="insp-sec">효과</div>
@@ -268,9 +310,10 @@ export default function RightPanel() {
               </div>
               <div className="insp-sec">정렬</div>
               <div className="insp-row seg">
-                <button className={(el.align || 'left') === 'left' ? 'on' : ''} onClick={() => patch({ align: 'left' })}>⇤</button>
-                <button className={el.align === 'center' ? 'on' : ''} onClick={() => patch({ align: 'center' })}>⇔</button>
-                <button className={el.align === 'right' ? 'on' : ''} onClick={() => patch({ align: 'right' })}>⇥</button>
+                {(['left', 'center', 'right'] as const).map((d) => (
+                  <button key={d} className={(el.align || 'left') === d ? 'on' : ''} title={ALIGN_LABEL[d]}
+                    onClick={() => patch({ align: d })}><AlignIcon dir={d} /></button>
+                ))}
               </div>
               <div className="insp-row">
                 <button className="insp-pill" onClick={() => emit('ebook:bullet')}>글머리표</button>

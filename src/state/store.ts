@@ -3,6 +3,7 @@ import { cardByKey } from '../cards/registry'
 import type { ImportedDoc } from '../import/htmlImport'
 import { polish } from '../builder/polish'
 import { dropHistory, popDocRedo, popDocSnap, pushDocRedo, pushDocSnap, pushDocUndoRaw } from '../canvas/history'
+import { slideSpot } from './pageOrder'
 import type { ThemeName } from '../design/tokens'
 export type Orientation = 'portrait' | 'landscape'
 export type SizePreset = 's' | 'm' | 'l'
@@ -165,7 +166,15 @@ export const useBuilder = create<BuilderState>((set, get) => ({
     // 슬라이드 = 빈 캔버스 편집 페이지(구글 슬라이드식). 블록편집기 없이 요소로 직접 편집.
     if (cardKey === 'slide') {
       const sp: Page = { id: uid++, cardKey: 'slide', fields: {}, free: true, els: [], conns: [], strokes: [], blocks: [], bg: '' }
-      return { pages: [...s.pages, sp], selectedPageId: sp.id }
+      /**
+       * **고른 쪽 바로 뒤에 끼운다**(EVER-SKETCH1 90e7439 · 원본 사용자 결정).
+       *
+       * 전에는 늘 **맨 끝**에 붙었다. 3장짜리에서 가운데(2번째)를 골라 놓고 「＋ 슬라이드」를
+       * 눌러도 **4번째**로 갔다 — 만들고 나서 손으로 끌어 올려야 했다. 파워포인트·키노트와 같게 맞춘다.
+       * **슬라이드만 그렇게 한다.** 다른 카드는 맨 끝 그대로다(아래 갈래).
+       */
+      const next = slideSpot(s.pages, s.selectedPageId)
+      return { pages: [...s.pages.slice(0, next), sp, ...s.pages.slice(next)], selectedPageId: sp.id }
     }
     const p: Page = { id: uid++, cardKey, fields: defaultsFor(cardKey), free: false, els: [], conns: [], strokes: [] }
     if (cardKey === 'note') {

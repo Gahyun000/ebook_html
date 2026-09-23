@@ -7,7 +7,9 @@ import type { CSSProperties } from 'react'
 import type { Page, FreeEl } from '../state/store'
 import { useBuilder } from '../state/store'
 import { useCanvasUI } from '../state/canvasUI'
-import { mkFreeEl, pushSnap, FCOLORS } from './model'
+import { mkFreeEl, pushSnap, FCOLORS, NO_FILL } from './model'
+import { centerSpot } from './dropSpot'
+import { CLIPPED, SHAPE_RADIUS, dashArray, polyClip, polyPoints } from './shapePaths'
 import { overlayOpen } from '../ui/overlay'
 import NoteBlocks from '../builder/NoteBlocks'
 import { bandRange, coveredSet, dragTrack, growToMerges, mergeCovering, sizeTracks, trackSizes } from './tableOps'
@@ -110,6 +112,19 @@ function snapOf(pg: Page): string {
 
 export default function FreeLayer({ page, W, H, interactive }: Props) {
   const tool = useCanvasUI((s) => s.tool)
+  /**
+   * **지금 무언가를 놓는 중인가**(도형·글상자·표·아이콘… · EVER-SKETCH1 46f155c).
+   *
+   * 원본 사용자 지적: 「텍스트 상자랑 맞물리면 도형이 생성이 안 돼. 사용자 입장에선 왜 안 되지?」
+   * 빈 곳을 누르면 그려지는데 **기존 요소 위를 누르면 아무 일도 안 일어났다.** 커서는 십자 그대로고,
+   * 엉뚱하게 그 요소가 골라진다. **막을 까닭이 없다** — 파워포인트도 키노트도 도형 도구를 든 채로는
+   * 기존 개체 위에 그냥 그려진다.
+   *
+   * 그래서 이 값을 **세 자리가 같이 본다**(레이어 · 요소 · 표 칸). 한 곳만 고치면
+   * 「글상자 위에는 되는데 표 위에는 안 되는」 식으로 갈라진다.
+   * 연결선·펜·형광펜·지우개는 요소 위 클릭이 **뜻이 있으므로** 여기 안 넣는다.
+   */
+  const adding = ADDABLE.indexOf(tool) >= 0
   const setTool = useCanvasUI((s) => s.setTool)
   const selEl = useCanvasUI((s) => s.selEl)
   const selEls = useCanvasUI((s) => s.selEls)
@@ -221,6 +236,40 @@ export default function FreeLayer({ page, W, H, interactive }: Props) {
     }
     window.addEventListener('ebook:insert-image', onInsert)
     return () => window.removeEventListener('ebook:insert-image', onInsert)
+  })
+
+  /**
+   * **고르면 곧바로 놓인다**(EVER-SKETCH1 e4dfbfd 도형 · 90e7439 글상자·표·글맵시).
+   *
+   * 바로 위 '삽입 → 이미지' 와 **같은 까닭, 같은 방식**이다 — 「도구만 켜두면 한 번 더 클릭해야
+   * 하는 걸 모르는 사람이 아무 반응 없다고 느낀다」. 자리는 `centerSpot` 이 정한다(한가운데,
+   * 이미 차 있으면 16px 씩 비껴서).
+   *
+   * **놓는 규칙은 여기 한 곳에만 둔다.** 도구줄·메뉴가 직접 `addEl` 을 부르면 캔버스 밖에서
+   * 요소가 생기는 길이 하나 더 생기고, 그 길은 되돌리기(snap)를 안 거친다.
+   * **클릭해서 놓는 길은 그대로 남긴다** — 단축키(r·o·d)로 든 도형은 자리를 정확히 찍는다.
+   */
+  useEffect(() => {
+    if (!interactive) return
+    const onPlace = (ev: Event) => {
+      const type = (ev as CustomEvent<{ type?: string }>).detail?.type
+      // 모르는 이름이 오면 **아무 일도 하지 않는다.** mkFreeEl 은 모르는 갈래를
+      // 조용히 네모(DEFS.box)로 바꾸므로, 안 막으면 오타가 네모로 둔갑해서 나온다.
+      if (!type || ADDABLE.indexOf(type) < 0) return
+      const el = mkFreeEl(type, 0, 0)
+      const at = centerSpot(page.els, el.w, el.h, W, H)
+      el.x = at.x; el.y = at.y
+      snap()
+      addEl(page.id, el)
+      setSel(el.id)
+      setTool('select')
+      // **글을 담는 것은 커서까지 넣어 준다**(90e7439). `startEditing` 을 좌표 없이 부르면
+      // 기본 글자가 **통째로 골라져서**, 그냥 치면 덮어써진다(키노트·파워포인트와 같은 손놀림).
+      // 표는 넣지 않는다 — 칸이 여럿이라 어느 칸일지 정할 수 없다.
+      if (type === 'text' || type === 'wordart') startEditing(el.id)
+    }
+    window.addEventListener('ebook:place', onPlace)
+    return () => window.removeEventListener('ebook:place', onPlace)
   })
 
   // 편집 중일 때, 편집 중인 요소 "밖"을 누르면 값을 저장하고 편집을 끝낸다.
@@ -386,7 +435,7 @@ export default function FreeLayer({ page, W, H, interactive }: Props) {
   // **표(table)도 넣었다**(EVER-SKETCH1 824ec0e). 표에 점이 붙으면 칸을 잡으려다 선이 그어진다.
   // 표끼리 이을 일은 드물고, 정말 필요하면 「→ 연결」로 이을 수 있다.
   const NO_CPT = ['text', 'icon', 'wordart', 'note', 'table']
-  const NO_FILL = ['text', 'icon', 'wordart', 'image', 'note', 'table']  // 채우기색 안 쓰는 타입
+  // 채우기색 안 쓰는 타입(NO_FILL)은 model.ts 한 곳에서 온다 — 도구줄과 같은 목록(EVER-SKETCH1 b1911d3).
   function setFill(el: FreeEl, c: string) { snap(); updateEl(page.id, el.id, { color: c }) }
   function startConnectFrom(id: number) { setSelConn(null); setConnSrc(id); setTool('connect') }
   // 그룹이면 그 그룹 전체 id, 아니면 자기 id
@@ -468,7 +517,9 @@ export default function FreeLayer({ page, W, H, interactive }: Props) {
 
   function onLayerDown(e: React.PointerEvent<HTMLDivElement>) {
     if (!active) return
-    if (e.target !== e.currentTarget) return
+    // 이 줄은 원래 **요소를 끌 때 마퀴 선택이 같이 시작되는 것**을 막으려고 있다.
+    // 무언가를 놓는 중일 때는 그 걱정이 없다 — 위에 그리는 것이 맞는 동작이다(EVER-SKETCH1 46f155c).
+    if (e.target !== e.currentTarget && !adding) return
     const rect = e.currentTarget.getBoundingClientRect()
     const z = zoomOf(rect)
     const x = (e.clientX - rect.left) / z, y = (e.clientY - rect.top) / z
@@ -538,6 +589,9 @@ export default function FreeLayer({ page, W, H, interactive }: Props) {
       return
     }
     if (tool === 'pen' || tool === 'highlighter' || tool === 'eraser') { e.stopPropagation(); return }
+    // **놓는 중이면 손대지 않는다.** 여기서 stopPropagation 하면 레이어가 못 받아
+    // 도형이 안 생긴다 — 그게 「왜 안 되지」의 정체였다(EVER-SKETCH1 46f155c).
+    if (adding) return
     e.preventDefault(); e.stopPropagation()
     // 다른 요소를 편집 중이었으면 값을 저장하고 끝낸다(안 그러면 편집 모드가 계속 남아 Delete 가 먹통).
     //
@@ -842,6 +896,21 @@ export default function FreeLayer({ page, W, H, interactive }: Props) {
         if (el.color === '#111318') style.borderColor = '#111318'
         if (el.borderColor) style.borderColor = el.borderColor
         if (el.borderWidth != null) style.borderWidth = el.borderWidth
+        // 선 모양(실선·파선·점선 · EVER-SKETCH1 f586a7b). 안 적혀 있으면 실선 — 옛 자료가 그대로 보인다.
+        if (el.borderDash) style.borderStyle = el.borderDash
+        /**
+         * **오려 만드는 갈래**(EVER-SKETCH1 518611b). 오리는 규칙을 CSS 가 아니라 여기서 입힌다 —
+         * 꼭짓점 한 벌(shapePaths)로 **오리고 또 그리려면** 두 곳이 같은 숫자를 봐야 한다.
+         *
+         * 상자 테두리는 **아예 끈다.** 오릴 때 같이 잘려서 꼭짓점에 자국만 남기 때문이다.
+         * 선은 밑에서 SVG 로 그린다.
+         */
+        const clipped = CLIPPED.includes(el.type)
+        if (clipped) {
+          style.clipPath = polyClip(el.type)
+          style.borderRadius = SHAPE_RADIUS[el.type] ?? 0
+          style.borderWidth = 0
+        }
         const txtStyle: CSSProperties = { fontSize: el.fs }
         if (el.bold) txtStyle.fontWeight = 800
         if (el.tcolor) txtStyle.color = el.tcolor
@@ -870,6 +939,18 @@ export default function FreeLayer({ page, W, H, interactive }: Props) {
               }
               startEditing(el.id, { x: e.clientX, y: e.clientY })
             } : undefined}>
+            {/* **오려 만든 갈래의 테두리**(EVER-SKETCH1 518611b). 상자에 그릴 수 없으니 그 위에 선을 얹는다.
+                굵기를 두 배로 그리면 바깥 절반이 오리는 규칙에 잘려 **딱 제 굵기**만 남고,
+                선이 모양 안쪽에 정확히 붙는다. (SVG 에는 「안쪽 선」이 따로 없다.) */}
+            {clipped && (el.borderWidth ?? 1.5) > 0 ? (
+              <svg className="fel-outline" viewBox={`0 0 ${el.w} ${el.h}`} aria-hidden="true">
+                <polygon points={polyPoints(el.type, el.w, el.h)} fill="none"
+                  stroke={el.borderColor || '#cfd5e2'}
+                  strokeWidth={(el.borderWidth ?? 1.5) * 2}
+                  strokeDasharray={dashArray(el.borderDash, el.borderWidth ?? 1.5)}
+                  strokeLinecap={el.borderDash === 'dotted' ? 'round' : undefined} />
+              </svg>
+            ) : null}
             {isNote
               ? (<div className="note-inner" style={{ pointerEvents: editingThis ? 'auto' : 'none' }}
                   onPointerDown={editingThis ? (e) => e.stopPropagation() : undefined}
@@ -905,7 +986,7 @@ export default function FreeLayer({ page, W, H, interactive }: Props) {
                         return (
                           <div key={k} className={'feltd' + (sel ? ' cellsel' : '')} suppressContentEditableWarning
                             data-tel={el.id} data-r={r} data-c={c} data-rc={r + '_' + c}
-                            style={{ border: bw + 'px solid ' + border, fontSize: cfs, padding: '3px 5px', overflow: 'hidden', background: cellBg, color: sel ? undefined : cellTextColor(bg), fontWeight: isHead ? 700 : 400, textAlign: al, gridColumn: m ? `${c + 1} / span ${m.cs}` : `${c + 1}`, gridRow: m ? `${r + 1} / span ${m.rs}` : `${r + 1}`, userSelect: editingThis ? 'text' : 'none', cursor: editingThis ? 'text' : 'default', ...(va ? { display: 'flex', flexDirection: 'column' as const, justifyContent: va === 'middle' ? 'center' : va === 'bottom' ? 'flex-end' : 'flex-start' } : null) }}
+                            style={{ border: bw + 'px ' + (el.borderDash || 'solid') + ' ' + border, fontSize: cfs, padding: '3px 5px', overflow: 'hidden', background: cellBg, color: sel ? undefined : cellTextColor(bg), fontWeight: isHead ? 700 : 400, textAlign: al, gridColumn: m ? `${c + 1} / span ${m.cs}` : `${c + 1}`, gridRow: m ? `${r + 1} / span ${m.rs}` : `${r + 1}`, userSelect: editingThis ? 'text' : 'none', cursor: editingThis ? 'text' : 'default', ...(va ? { display: 'flex', flexDirection: 'column' as const, justifyContent: va === 'middle' ? 'center' : va === 'bottom' ? 'flex-end' : 'flex-start' } : null) }}
                             contentEditable={editingThis}
                             onKeyDown={editingThis ? (e) => {
                               // 값은 endEditing() 이 먼저 커밋한다. 칸을 옮기기 전에 반드시 거쳐야 한다.
@@ -915,6 +996,9 @@ export default function FreeLayer({ page, W, H, interactive }: Props) {
                               if (e.key === 'Tab') { to(r, e.shiftKey ? Math.max(0, c - 1) : Math.min(C - 1, c + 1)) }
                             } : undefined}
                             onPointerDown={(e) => {
+                              // 표 칸도 놓는 중이면 흘려보낸다(EVER-SKETCH1 46f155c). 여기만 빼 두면
+                              // 「글상자 위에는 그려지는데 표 위에는 안 되는」 반쪽이 된다.
+                              if (adding) return
                               // **편집 중에 다른 칸을 누르면 거기서 빠져나온다**(EVER-SKETCH1 미커밋 2026-09-18 · 사용자 신고).
                               //
                               // 사용자: 「표 클릭했을때 밖에 클릭해야 글씨 풀리는 게 불편함 /
