@@ -1,0 +1,59 @@
+/* 대화상자 껍데기 — Modal.tsx 하나만 쓴다.
+   폭·모서리·그림자를 여기서만 정해서, 창마다 조금씩 다르게 생기는 일을 없앤다. */
+.ui-scrim {
+  /* **화면에서 가장 위.** 확인창이 무언가에 가리면 사람은 「눌렀는데 아무 일도 안 난다」로 본다.
+     결재함·계정·팀 화면은 z-index 4000 짜리 덮개 위에 뜬다(auth.css). 300 이던 시절에는
+     덮개 없는 화면(저장 확인·새 자료)에서만 써서 드러나지 않았을 뿐이다. */
+  position: fixed; inset: 0; background: rgba(15, 20, 35, .42); z-index: 4200;
+  display: flex; align-items: center; justify-content: center; padding: 24px;
+}
+.ui-modal {
+  background: #fff; border-radius: 14px; max-height: 86vh; overflow: auto;
+  padding: 20px 24px 22px; box-shadow: 0 24px 70px rgba(15, 27, 61, .3);
+  display: flex; flex-direction: column;
+}
+.ui-modal.sm { width: min(460px, 94vw); }
+.ui-modal.md { width: min(620px, 96vw); }
+.ui-modal.lg { width: min(1080px, 96vw); }
+
+.ui-modal-head { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 12px; }
+.ui-modal-head h3 {
+  flex: 1; min-width: 0; margin: 0;
+  font-size: 16.5px; font-weight: 800; line-height: 1.35; color: var(--navy, #16234a);
+}
+/* 나가는 길이 둘이면 어느 쪽이 「그만두기」인지 한 번 생각하게 된다 —
+   그래서 취소 버튼이 있는 창에는 ✕ 를 달지 않는다(사용자 결정 2026-09-08).
+   대신 **둘 다 없는 창**을 못 만들도록 `cancel` 을 필수로 받는다(Modal.tsx). */
+
+/* 본문 글자는 **껍데기가 정한다.** 창마다 들고 오게 두었더니 13px 과 13.5px 로 갈렸다.
+   한 곳에 두는 것이 이 껍데기의 존재 이유다. */
+.ui-modal-body { flex: 1; min-height: 0; font-size: 13px; line-height: 1.65; color: #5b6270; }
+.ui-modal-body b { color: #1c2433; }
+.ui-modal-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+
+/* 나가는 버튼 — **모든 창에서 같게 생긴다.** 창마다 제 클래스를 들고 오면
+   「그만두는 자리」가 창마다 조금씩 다르게 보이고, 급할 때 그 차이가 손을 늦춘다.
+   자리도 늘 맨 앞이다(Modal.tsx). */
+.ui-modal-cancel {
+  border: 1.4px solid #e5e7eb; background: #fff; color: #334155;
+  font: inherit; font-size: 13px; font-weight: 800; border-radius: 9px;
+  padding: 8px 16px; cursor: pointer;
+}
+.ui-modal-cancel:hover:not(:disabled) { background: #f7f9fd; }
+.ui-modal-cancel:disabled { opacity: .45; cursor: not-allowed; }
+
+/* ✕ — **취소 버튼이 마땅치 않은 창에만** 단다(보기만 하는 창).
+   `cancel="closeX"` 로 명시한 창에서만 나온다. */
+.ui-modal-x {
+  border: 0; background: none; cursor: pointer; font-size: 15px; color: #8b94a6;
+  width: 28px; height: 28px; border-radius: 8px; flex-shrink: 0;
+}
+.ui-modal-x:hover:not(:disabled) { background: #eef1f6; color: #333; }
+.ui-modal-x:disabled { opacity: .4; cursor: default; }
+
+/* 오류는 **무엇을 하려다 실패했는지**와 함께 적는다.
+   「저장하지 못했어요」만으로는 다시 눌러야 할지 그만둬야 할지 알 수 없다. */
+.ui-modal-err {
+  background: #fdecec; border: 1px solid #f3c2c2; color: #9c2b2b;
+  border-radius: 8px; padding: 9px 11px; font-size: 12.5px; line-height: 1.6; margin-bottom: 12px;
+}

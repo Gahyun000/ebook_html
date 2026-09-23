@@ -801,7 +801,8 @@ STAGES.push(['5단계 · 오른쪽 패널 접이식 묶음', async () => {
 }])
 
 // ── 6단계 ─────────────────────────────────────────────────
-// 마인드맵을 요소로(68a5627 · 8c7c812) · 머메이드 TB·LR → 트리 요소(2b6abf0 · d716ae0 · c7effe6 · e8f80f7).
+// 마인드맵을 요소로(68a5627 · 8c7c812) · 머메이드 TB·LR → 트리 요소(2b6abf0 · d716ae0 · c7effe6 · e8f80f7) ·
+// 공용 창 껍데기(e0afde4 · 82d87f4 · 65f4df2).
 const panel6 = () => p.locator('.ax-inspector')
 /** 아무것도 안 고른 상태로 — 오른쪽 패널이 쪽 칸을 보여 준다. */
 async function deselect() {
@@ -999,6 +1000,44 @@ STAGES.push(['6단계 · 옛 마인드맵 카드 펼치기', async () => {
   const back = await p.locator('.stage').first().innerText()
   await deselect()
   ok('[옛 마인드맵] ⌘Z 뒤에도 카드 글이 그대로다(빈 쪽이 되지 않는다)', /옛 중심/.test(back) && (await ex.count()) === 1, back.slice(0, 60).replace(/\n/g, ' '))
+}])
+
+STAGES.push(['6단계 · 공용 창 껍데기', async () => {
+  await freshBook()
+  await p.goto(URL, { waitUntil: 'networkidle' })
+  await p.waitForSelector('.lib-card', { timeout: 15000 })
+  const cards0 = await p.locator('.lib-card').count()
+  // Esc 로 닫힌다
+  await p.locator('.lib-card .lib-act.danger').first().click(); await p.waitForTimeout(200)
+  ok('[창] 이북 삭제는 공용 껍데기(ui-scrim)로 뜬다', (await p.locator('.ui-scrim.lib-confirm .ui-modal').count()) === 1)
+  ok('[창] 나가는 버튼(취소)이 맨 앞이다', (await p.locator('.ui-modal-foot button').first().innerText()).trim() === '취소')
+  await p.keyboard.press('Escape'); await p.waitForTimeout(200)
+  ok('[창] Esc 로 닫힌다', (await p.locator('.ui-scrim').count()) === 0)
+  ok('[창] 닫혀도 지워지지 않았다', (await p.locator('.lib-card').count()) === cards0)
+  // 두 번 눌러도 한 번만 간다 — 응답을 400ms 늦춰 그 사이를 만든다.
+  let dels = 0
+  await p.route('**/api/projects/*', async (route) => {
+    if (route.request().method() === 'DELETE') { dels++; await new Promise((r) => setTimeout(r, 400)) }
+    await route.continue()
+  })
+  await p.locator('.lib-card .lib-act.danger').first().click(); await p.waitForTimeout(200)
+  await p.locator('.ui-modal .lib-c-ok').dblclick()
+  await p.waitForTimeout(150)
+  const busyTxt = await p.locator('.ui-modal .lib-c-ok').innerText().catch(() => '')
+  ok('[창] 처리 중에는 「삭제 중…」 으로 잠긴다', /삭제 중/.test(busyTxt), busyTxt)
+  await p.keyboard.press('Escape'); await p.waitForTimeout(100)
+  ok('[창] 처리 중에는 Esc 로도 안 닫힌다', (await p.locator('.ui-scrim').count()) === 1)
+  await p.waitForTimeout(900)
+  await p.unroute('**/api/projects/*')
+  ok('[창] 확인을 두 번 눌러도 삭제 요청은 한 번', dels === 1, String(dels))
+  ok('[창] 끝나면 창이 닫힌다', (await p.locator('.ui-scrim').count()) === 0)
+  ok('[창] 한 권만 지워졌다', (await p.locator('.lib-card').count()) === cards0 - 1, `${cards0} → ${await p.locator('.lib-card').count()}`)
+  ok('[창] 다음에 연 창에 지난 오류가 안 남는다', await (async () => {
+    await p.locator('.lib-card .lib-act.danger').first().click(); await p.waitForTimeout(200)
+    const n = await p.locator('.ui-modal .lib-delerr').count()
+    await p.keyboard.press('Escape'); await p.waitForTimeout(150)
+    return n === 0
+  })())
 }])
 
 // ONLY=5단계 처럼 주면 그 이름이 든 단계만 돈다(고치는 동안 빨리 돌리려고). 비우면 전부.

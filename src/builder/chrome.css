@@ -103,14 +103,13 @@
 .ax-tbtn.imp{background:var(--ax-navy);color:#fff;border-color:var(--ax-navy)}
 .ax-tbtn.on{background:var(--ax-blue-100);border-color:var(--ax-blue);color:var(--ax-blue-d)}
 .ax-tbtn.dark{background:#111;color:#fff;border-color:#111}
-.save-scrim{z-index:240;display:flex;align-items:center;justify-content:center;background:rgba(15,20,30,.48)}
-.save-modal{width:min(420px,92vw);background:#fff;border:1px solid var(--ax-line);border-radius:12px;box-shadow:0 24px 70px -26px rgba(0,0,0,.45);padding:22px}
-.save-modal h2{font-size:18px;line-height:1.25;margin:0 0 8px;color:var(--ax-ink)}
-.save-modal p{font-size:13.5px;line-height:1.5;margin:0 0 6px;color:var(--ax-ink2)}
+/* 껍데기(스크림·상자·제목·버튼줄)는 ui/modal.css 하나가 맡는다(EVER-SKETCH1 82d87f4).
+   여기 남는 건 이 창에만 있는 글자 모양뿐이다. */
+.save-modal .save-msg{font-size:13.5px;line-height:1.6;margin:0;color:var(--ax-ink2)}
 .save-modal small{display:block;font-size:12px;color:var(--ax-muted);margin-top:4px}
 .save-modal .save-err{margin:10px 0 0;padding:9px 11px;border-radius:8px;background:#FDE8E6;border:1px solid #F6C6C1;color:#a12a21;font-size:12.5px;font-weight:600}
-.save-actions .ax-tbtn:disabled{opacity:.55;cursor:default}
-.save-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:18px;flex-wrap:wrap}
+/* 저장 중에는 버튼을 잠근다. 버튼줄 배치는 ui/modal.css 가 맡는다. */
+.ui-modal-foot .ax-tbtn:disabled{opacity:.55;cursor:default}
 .ax-fsel{font-size:12px;border:1px solid var(--ax-line);border-radius:6px;padding:5px 6px;background:#fff;color:var(--ax-ink)}
 .ax-fnum{font-size:12px;border:1px solid var(--ax-line);border-radius:6px;padding:5px 4px;width:46px;background:#fff;color:var(--ax-ink)}
 

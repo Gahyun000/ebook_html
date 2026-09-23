@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { useBuilder } from '../state/store'
 import { CARD_REGISTRY } from '../cards/registry'
@@ -108,6 +108,24 @@ export default function CardPicker() {
   }
   /** 머메이드 문. **표본을 늘 새로 채운다** — 안 그러면 TB 를 눌렀는데 아까 LR 글이 남아 있다. */
   function pickMermaid(d: typeof MM_DOORS[number]) { setDoor(d); setMm(d.src); setAskTree(true) }
+
+  /* **이건 모달이 아니라 드롭다운이다** — 버튼에 붙어 뜨므로 ui/Modal 로 옮기지 않는다.
+     그런데 나가는 길이 **바깥 누르기 하나뿐이었다.** 버튼도 없고 Esc 도 안 먹어서,
+     그걸 모르는 사람은 갇힌다. 대화상자가 아니어도 나가는 길은 있어야 한다. */
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      // 캔버스가 window 에서 Escape 를 듣고 있다 — 그냥 두면 골라 둔 것까지 함께 풀린다.
+      e.preventDefault(); e.stopPropagation()
+      // (ebook_html) 원본은 여기서 `setOpen(false); setQ('')` 만 해서, 가지 수·머메이드 글 받는
+      // 한 걸음에서 Esc 로 닫으면 **다음에 열 때 목록이 아니라 그 걸음이 그대로** 떴다.
+      // 바깥 누르기(close)와 같은 길로 닫는다.
+      close()
+    }
+    document.addEventListener('keydown', onKey, true)
+    return () => document.removeEventListener('keydown', onKey, true)
+  }, [open])
 
   const term = q.trim()
   const lc = term.toLowerCase()

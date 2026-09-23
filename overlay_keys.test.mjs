@@ -30,7 +30,7 @@
 // **위를 덮은 것이 있으면 아래는 키를 건드리지 않는다**(src/ui/overlay.ts).
 //
 // ebook_html 이식(EVER-SKETCH1 bab224b): 모달 껍데기(src/ui/Modal.tsx)는 6단계 공용 창에서
-// 들어온다. 그래서 「모달 껍데기도 센다」 검사는 뺐고, 그 단계에서 다시 넣는다.
+// 들어왔다. 1단계에서 빼 두었던 「모달 껍데기도 센다」 검사를 6단계에서 되살렸다.
 // (승인 화면 SlideViewer 는 ebook_html 에 없다.)
 //
 // 실행: node --experimental-strip-types --import ./ts_register.mjs overlay_keys.test.mjs
@@ -109,7 +109,8 @@ for (const { f, name } of CASES) {
 
   // 덮는 쪽 셋이 실제로 센다
   for (const [f, name] of [['./src/builder/Present.tsx','발표'],
-                           ['./src/builder/TutorialPlayer.tsx','시연']]) {
+                           ['./src/builder/TutorialPlayer.tsx','시연'],
+                           ['./src/ui/Modal.tsx','모달 껍데기']]) {
     check(/useOverlay\(/.test(read(f)), `${name}: 덮고 있는 동안 스스로 센다`)
   }
   // 아래가 실제로 물러나는가 — **두 리스너 모두**. 하나만 고치면 「발표는 되는데
