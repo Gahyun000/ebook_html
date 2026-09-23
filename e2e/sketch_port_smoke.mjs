@@ -156,7 +156,149 @@ STAGES.push(['1단계', async () => {
   ok('[패널] 넓히면 다시 편다', (await p.locator('.ax-edge.l.named').count()) === 0)
 }])
 
-// ── (2단계부터 여기에 덧붙인다) ────────────────────────────
+// ── 2단계 ─────────────────────────────────────────────────
+const SHOT_DIR = process.env.SHOT_DIR || ''
+
+/** 목록 화면으로 돌아가 새 이북을 하나 연다. 앞 단계의 흔적 없이 시작한다. */
+async function freshBook() {
+  await p.goto(URL, { waitUntil: 'networkidle' })
+  await p.locator('.lib-new').click()
+  await p.waitForSelector('.ax-app .axth', { timeout: 15000 })
+  await p.waitForTimeout(400)
+}
+
+// (추가 요청) 새 이북을 열자마자 ⌘Z 를 누르면 첫 빈 슬라이드가 지워졌다.
+// newProject 가 resetHistory() 를 addCard 보다 **먼저** 불러, 첫 장이 되돌릴 수 있는 일이 됐다.
+STAGES.push(['2단계 · 새 이북 직후 ⌘Z', async () => {
+  await freshBook()
+  const n0 = await thumbs.count()
+  await p.evaluate(() => { const a = document.activeElement; if (a && a.blur) a.blur() })   // 입력칸 밖에 초점
+  await p.keyboard.press('ControlOrMeta+z'); await p.waitForTimeout(300)
+  const n1 = await thumbs.count()
+  ok('[새 이북] 첫 슬라이드 한 장으로 시작한다', n0 === 1, String(n0))
+  ok('[새 이북] 바로 ⌘Z 를 눌러도 첫 슬라이드가 남는다', n1 === 1, `${n0} → ${n1}`)
+}])
+
+// ① 화면 배율 (EVER-SKETCH1 1363964 배율 부분) — 원본 e2e/zoom_smoke.mjs 를 옮김
+STAGES.push(['2단계 · 화면 배율', async () => {
+  const pct = async () => Number((await p.locator('.pv-zoom .v').innerText()).replace('%', ''))
+  /** 숫자가 아니라 **눈에 보이는 종이**를 잰다. */
+  const paper = async () => (await p.locator('.stage .freelayer').first().boundingBox()).width
+  const fitOn = async () => (await p.locator('.pv-zoom .fitb.on').count()) === 1
+  const plus = p.locator('.pv-zoom button', { hasText: '+' }).first()
+  const minus = p.locator('.pv-zoom button', { hasText: '−' }).first()
+
+  ok('[배율] 상태막대에 배율 조절이 있다', (await p.locator('.pv-zoom').count()) === 1)
+  ok('[배율] 처음엔 「맞춤」이 켜져 있다', await fitOn())
+  const tips = await p.locator('.pv-zoom button').evaluateAll((bs) => bs.map((b) => b.title).join(' | '))
+  ok('[배율] 툴팁에 그 사람 키보드 글자(⌘/Ctrl 섞어 쓰기 없음)', !tips.includes('⌘/Ctrl') && /[⌘]|Ctrl/.test(tips), tips)
+
+  const z0 = await pct(), w0 = await paper()
+  await plus.click(); await p.waitForTimeout(300)
+  const z1 = await pct(), w1 = await paper()
+  ok('[배율] + 를 누르면 % 와 종이가 커진다', z1 > z0 && w1 > w0 + 20, `${z0}% ${Math.round(w0)}px → ${z1}% ${Math.round(w1)}px`)
+  ok('[배율] 사람이 손대면 「맞춤」이 꺼진다', !(await fitOn()))
+  await minus.click(); await minus.click(); await p.waitForTimeout(300)
+  const z2 = await pct(), w2 = await paper()
+  ok('[배율] − 를 누르면 작아진다', z2 < z1 && w2 < w1 - 20, `${z1}% ${Math.round(w1)}px → ${z2}% ${Math.round(w2)}px`)
+  await p.locator('.pv-zoom .fitb').click(); await p.waitForTimeout(300)
+  ok('[배율] 「맞춤」이 창에 맞춘 배율로 되돌린다', (await pct()) === z0 && await fitOn(), `${z2}% → ${await pct()}% (처음 ${z0}%)`)
+
+  await p.keyboard.press('ControlOrMeta+Equal'); await p.waitForTimeout(300)
+  ok('[배율] ⌘/Ctrl = 로도 커진다', (await pct()) > z0, `${await pct()}%`)
+  await p.keyboard.press('ControlOrMeta+Minus'); await p.keyboard.press('ControlOrMeta+Minus'); await p.waitForTimeout(300)
+  ok('[배율] ⌘/Ctrl − 로 작아진다', (await pct()) < z0, `${await pct()}%`)
+  await p.keyboard.press('ControlOrMeta+Digit0'); await p.waitForTimeout(300)
+  ok('[배율] ⌘/Ctrl 0 이 맞춤으로 되돌린다', (await pct()) === z0 && await fitOn())
+
+  // Ctrl+휠 — 브라우저가 페이지째 확대하지 않고 우리가 받는다.
+  const sb = await p.locator('.stage').first().boundingBox()
+  await p.mouse.move(sb.x + sb.width / 2, sb.y + sb.height / 2)
+  await p.keyboard.down('Control'); await p.mouse.wheel(0, -100); await p.keyboard.up('Control'); await p.waitForTimeout(300)
+  ok('[배율] Ctrl+휠 위로 = 확대', (await pct()) > z0, `${await pct()}%`)
+  await p.keyboard.press('ControlOrMeta+Digit0'); await p.waitForTimeout(200)
+
+  // 100% 를 넘을 수 있다 — 상한이 남아 있으면 + 를 눌러도·창을 키워도 100 에서 멈춘다.
+  for (let i = 0; i < 4; i++) { await plus.click(); await p.waitForTimeout(80) }
+  const zBig = await pct()
+  ok('[배율] + 로 100% 를 넘긴다', zBig > 100, `${zBig}%`)
+  // 종이가 작업창보다 커져도 왼쪽 끝이 잘려 나가지 않는다(스크롤로 닿는다).
+  const st = await p.locator('.stage').first().boundingBox()
+  const pl = await p.locator('.stage .freelayer').first().boundingBox()
+  ok('[배율] 작업창보다 커진 종이의 왼쪽 끝이 잘리지 않는다', pl.width > st.width && pl.x >= st.x - 1,
+    `작업창 x ${Math.round(st.x)} · 종이 x ${Math.round(pl.x)} · 폭 ${Math.round(pl.width)}`)
+  await p.locator('.pv-zoom .fitb').click()
+  await p.setViewportSize({ width: 2200, height: 1400 }); await p.waitForTimeout(500)
+  ok('[배율] 창을 키우면 맞춤 배율이 100% 를 넘는다(상한이 풀렸다)', (await pct()) > 100, `${await pct()}%`)
+  await p.setViewportSize({ width: 1440, height: 900 }); await p.waitForTimeout(400)
+}])
+
+// 표 — 칸을 끌면 범위 선택, 표는 ⠿ 손잡이로만 움직인다 (b721df0 기반 · 8cb80f5 손잡이 자리)
+STAGES.push(['2단계 · 표 칸 끌기 · ⠿ 이동 · 다시 열기', async () => {
+  const tblFel = () => layer().locator('.fel:has(.feltable)').first()
+  const lb = await layer().boundingBox()
+  await p.locator('.ib[title="표"]').first().click()
+  await p.mouse.click(lb.x + lb.width * 0.4, lb.y + lb.height * 0.35)
+  await p.waitForTimeout(300)
+  ok('[표] 표가 놓였다', (await layer().locator('.feltable').count()) === 1)
+
+  const cell = (r, c) => tblFel().locator(`.feltd[data-r="${r}"][data-c="${c}"]`)
+  const center = async (loc) => { const b = await loc.boundingBox(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 } }
+  const box0 = await tblFel().boundingBox()
+  const a = await center(cell(0, 0)), z = await center(cell(1, 1))
+  await p.mouse.move(a.x, a.y); await p.mouse.down()
+  for (let i = 1; i <= 6; i++) await p.mouse.move(a.x + (z.x - a.x) * i / 6, a.y + (z.y - a.y) * i / 6)
+  await p.mouse.up(); await p.waitForTimeout(200)
+  const box1 = await tblFel().boundingBox()
+  const nSel = await tblFel().locator('.feltd.cellsel').count()
+  ok('[표] 칸에서 칸으로 끌면 범위가 골라진다(2×2)', nSel === 4, `골라진 칸 ${nSel}`)
+  const hint = await p.locator('.ax-tbrow.ctx .tbtn-hint').first().innerText().catch(() => '')
+  ok('[표] 둘째 줄 표 도구가 범위를 말해 준다', /2×2/.test(hint), JSON.stringify(hint))
+  ok('[표] 칸을 끌어도 표는 제자리다', Math.abs(box1.x - box0.x) < 1 && Math.abs(box1.y - box0.y) < 1,
+    `(${Math.round(box0.x)},${Math.round(box0.y)}) → (${Math.round(box1.x)},${Math.round(box1.y)})`)
+
+  // ⠿ 손잡이는 **확대한 상태에서** 끈다 — 표가 커서를 그대로 따라오면 zoomOf 가 좌표를 나눈 것이다.
+  await p.locator('.pv-zoom button', { hasText: '+' }).first().click(); await p.waitForTimeout(300)
+  const handle = layer().locator('.tbl-move')
+  ok('[표] 표를 고르면 ⠿ 손잡이가 보인다', (await handle.count()) === 1)
+  const hb = await handle.boundingBox(); const tb0 = await tblFel().boundingBox()
+  await p.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2); await p.mouse.down()
+  for (let i = 1; i <= 6; i++) await p.mouse.move(hb.x + hb.width / 2 + 10 * i, hb.y + hb.height / 2 + 7 * i)
+  await p.mouse.up(); await p.waitForTimeout(250)
+  const tb1 = await tblFel().boundingBox()
+  const dx = tb1.x - tb0.x, dy = tb1.y - tb0.y
+  ok('[표] ⠿ 를 끌면 표가 움직인다', dx > 40 && dy > 25, `dx ${dx.toFixed(1)} dy ${dy.toFixed(1)}`)
+  ok('[표] 확대 중에도 표가 커서를 그대로 따라온다(배율로 나눔)', Math.abs(dx - 60) < 4 && Math.abs(dy - 42) < 4,
+    `커서 (60,42) · 표 (${dx.toFixed(1)},${dy.toFixed(1)})`)
+  if (SHOT_DIR) {
+    const z = (await p.locator('.pv-zoom .v').innerText()).replace('%', '')
+    await p.screenshot({ path: SHOT_DIR + '/stage2_zoom_' + z + 'pct.png' })
+  }
+  await p.locator('.pv-zoom .fitb').click(); await p.waitForTimeout(300)
+
+  // 칸 더블클릭 = 그 칸에 바로 쓰기
+  await cell(1, 0).dblclick(); await p.waitForTimeout(300)
+  const focused = await p.evaluate(() => { const a = document.activeElement; return a ? a.getAttribute('data-rc') : null })
+  ok('[표] 칸을 더블클릭하면 그 칸에 커서가 선다', focused === '1_0', String(focused))
+  await p.keyboard.press('ControlOrMeta+a')   // 새 표 칸의 기본 글(「내용」 등)을 갈아 쓴다
+  await p.keyboard.type('이식2')
+  await p.mouse.click(lb.x + lb.width - 15, lb.y + lb.height - 15); await p.waitForTimeout(200)
+  ok('[표] 친 글이 칸에 남는다', (await cell(1, 0).innerText()) === '이식2', await cell(1, 0).innerText())
+
+  // 저장을 기다렸다 다시 연다
+  for (let i = 0; i < 30; i++) {
+    const s = await p.locator('.save-lab').innerText().catch(() => '')
+    if (s === '저장됨') break
+    await p.waitForTimeout(300)
+  }
+  await p.waitForTimeout(1200)
+  await p.goto(URL, { waitUntil: 'networkidle' })
+  await p.locator('.lib-open-hit').first().click()
+  await p.waitForSelector('.ax-app .axth', { timeout: 15000 }); await p.waitForTimeout(500)
+  const again = layer().locator('.fel:has(.feltable)')
+  const text = await again.locator('.feltd[data-r="1"][data-c="0"]').innerText().catch(() => '')
+  ok('[표] 다시 열어도 표와 글이 그대로다', (await again.count()) === 1 && text === '이식2', `표 ${await again.count()} · ${JSON.stringify(text)}`)
+}])
 
 for (const [name, run] of STAGES) {
   console.log(`\n# ${name}`)

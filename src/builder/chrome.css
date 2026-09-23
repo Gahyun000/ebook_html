@@ -45,7 +45,11 @@
 .ax-msep{height:1px;background:var(--ax-line);margin:5px 4px}
 
 /* 툴바 */
-.ax-tb{display:flex;align-items:center;gap:6px;background:var(--ax-plane);padding:7px 14px;border-bottom:1px solid var(--ax-line);flex-wrap:wrap;flex:0 0 auto}
+/* 도구줄은 두 줄이다 — 첫 줄 만들기 도구, 둘째 줄 고른 것에 따른 도구(EVER-SKETCH1 b721df0).
+   둘째 줄은 비어 보여도 지우거나 감추지 않는다(EditToolbar 주석 참고). */
+.ax-tb{display:flex;flex-direction:column;gap:5px;background:var(--ax-plane);padding:7px 14px;border-bottom:1px solid var(--ax-line);flex:0 0 auto}
+.ax-tbrow{display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-height:32px}
+.ax-tbrow.ctx{min-height:30px}
 .ax-tb .ib{width:32px;height:32px;border-radius:7px;border:0;background:none;cursor:pointer;display:grid;place-items:center;font-size:15px;color:#3a3a3a}
 .ax-tb .ib:hover{background:#e6e8ec}
 .ax-tb .ib.on{background:var(--ax-blue-100);color:var(--ax-blue-d)}
@@ -167,7 +171,11 @@
   font-weight:800;letter-spacing:.06em;line-height:1}
 .ax-edge.named:hover{background:var(--ax-blue-100)}
 .ax-edge:hover{color:var(--ax-blue);border-color:var(--ax-blue)}
-.ax-stage-wrap .stage{flex:1 1 auto;min-height:0;overflow:auto;display:flex;align-items:flex-start;justify-content:center;padding:16px}
+/* 가운데 두기는 justify-content:center 가 아니라 **자식의 auto 여백**으로 한다.
+   화면 배율이 100% 를 넘어 종이가 작업창보다 커지면 center 는 종이 왼쪽을 음수 쪽으로 밀어내
+   스크롤로도 못 가는 자리를 만든다. auto 여백은 모자랄 때 0 이 되어 왼쪽 끝부터 스크롤된다. */
+.ax-stage-wrap .stage{flex:1 1 auto;min-height:0;overflow:auto;display:flex;align-items:flex-start;justify-content:flex-start;padding:16px}
+.ax-stage-wrap .stage > *{margin-left:auto;margin-right:auto}
 .ax-panelcol{display:grid;grid-template-columns:1fr 52px;background:var(--ax-surface);border-left:1px solid var(--ax-line);min-height:0}
 .ax-panel{overflow:auto;padding:14px 14px 20px;border-right:1px solid var(--ax-line)}
 .ax-panel h4{font-size:12px;font-weight:800;color:var(--ax-muted);letter-spacing:.02em;margin:14px 0 8px}
@@ -328,3 +336,32 @@
 
 .insp-pill:disabled{opacity:.45;cursor:default}
 .insp-pill:disabled:hover{background:#fff}
+
+/* 화면 배율 조절 — 상태막대 안의 작은 묶음(EVER-SKETCH1 1363964).
+   여태 배율은 바꿀 수단이 없었고, 맞춤은 100% 에서 멈췄다. */
+.pv-zoom{display:inline-flex;align-items:center;gap:2px;vertical-align:middle}
+.pv-zoom button{border:1px solid var(--ax-line,#e6e8ee);background:#fff;border-radius:6px;
+  min-width:20px;height:19px;padding:0 5px;font:inherit;font-size:11.5px;line-height:1;
+  color:var(--ax-sub,#5b6270);cursor:pointer}
+.pv-zoom button:hover{background:#f2f5fa;color:#0F1B3D}
+.pv-zoom .v{min-width:38px;text-align:center;font-variant-numeric:tabular-nums;
+  font-weight:700;color:#0F1B3D}
+.pv-zoom .fitb{margin-left:3px}
+.pv-zoom .fitb.on{background:#EAF1FE;border-color:#bcd2fb;color:#2462EB;font-weight:700}
+
+/* 쓸 수 없는 상태의 도구 묶음 — 사라지지 않고 흐려진다(도구줄 높이를 지킨다). */
+.ax-grp.off{opacity:.5}
+.ax-grp.off .lab{color:#9aa3b2}
+/* 둘째 줄 표 도구(EditToolbar::TableTools). */
+.ax-tb .tbtn{
+  height:26px;padding:0 10px;border-radius:7px;border:1px solid rgba(42,120,214,.28);
+  background:#fff;cursor:pointer;font-size:12px;font-family:inherit;color:#1c2433;white-space:nowrap;
+}
+.ax-tb .tbtn:hover:not(:disabled){background:rgba(42,120,214,.10)}
+.ax-tb .tbtn:disabled{opacity:.4;cursor:not-allowed}
+/* **폭을 고정한다.** 이 문구는 끄는 도중에 바뀐다('칸을 끌어서 선택' → '1×4 선택').
+   길이가 달라지면 도구줄이 줄바꿈을 넘나들며 높이가 변하고, 그만큼 작업창이 움직인다. */
+.ax-tb .tbtn-hint{
+  font-size:11px;color:#5b6270;padding:0 4px;font-variant-numeric:tabular-nums;
+  display:inline-block;width:184px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}

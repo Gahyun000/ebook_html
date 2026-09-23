@@ -179,17 +179,19 @@ export default function PageView({ page, docTitle, orientation, size, font, tocI
   // 항목을 드래그하면 그 자리 그대로 자유 객체로 떼어내 따라 움직인다(문턱 넘을 때만).
   function startDetachDrag(e: React.PointerEvent<HTMLElement>, boxEl: HTMLElement, styleEl: HTMLElement, k: string, text: string) {
     const sx = e.clientX, sy = e.clientY
-    let id: number | null = null, startX = 0, startY = 0
+    let id: number | null = null, startX = 0, startY = 0, z = 1
     const move = (ev: PointerEvent) => {
       if (id == null && Math.abs(ev.clientX - sx) + Math.abs(ev.clientY - sy) > 5) {
         const pr = pageRef.current ? pageRef.current.getBoundingClientRect() : null
         if (!pr) return
+        // 종이는 화면 배율(Preview)만큼 커져 있다 — 화면 픽셀을 논리 좌표로 나눠 옮긴다.
+        z = pageRef.current && pageRef.current.offsetWidth > 0 ? pr.width / pageRef.current.offsetWidth : 1
         const r = boxEl.getBoundingClientRect(); const cs = window.getComputedStyle(styleEl)
         pushSnap(page.id, JSON.stringify({ els: page.els, conns: page.conns, strokes: page.strokes, detached: page.detached }))
-        id = detachField(page.id, k, { x: Math.round(r.left - pr.left), y: Math.round(r.top - pr.top), w: Math.round(r.width), h: Math.round(r.height), text, fs: parseFloat(cs.fontSize) || 14, tcolor: cs.color, bold: parseInt(cs.fontWeight, 10) >= 600, align: (cs.textAlign as 'left' | 'center' | 'right') })
-        setSel(id); startX = Math.round(r.left - pr.left); startY = Math.round(r.top - pr.top)
+        id = detachField(page.id, k, { x: Math.round((r.left - pr.left) / z), y: Math.round((r.top - pr.top) / z), w: Math.round(r.width / z), h: Math.round(r.height / z), text, fs: parseFloat(cs.fontSize) || 14, tcolor: cs.color, bold: parseInt(cs.fontWeight, 10) >= 600, align: (cs.textAlign as 'left' | 'center' | 'right') })
+        setSel(id); startX = Math.round((r.left - pr.left) / z); startY = Math.round((r.top - pr.top) / z)
       }
-      if (id != null) moveEls(page.id, [{ id, x: startX + (ev.clientX - sx), y: startY + (ev.clientY - sy) }])
+      if (id != null) moveEls(page.id, [{ id, x: startX + (ev.clientX - sx) / z, y: startY + (ev.clientY - sy) / z }])
     }
     const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up) }
     window.addEventListener('pointermove', move); window.addEventListener('pointerup', up)
@@ -197,27 +199,29 @@ export default function PageView({ page, docTitle, orientation, size, font, tocI
   // 스타일 박스(배경/테두리 있는 칸)를 통째로 떼어낸다 — 드래그 시 박스 객체로 분리, 그 칸은 숨김.
   function startDetachBox(e: React.PointerEvent<HTMLElement>, boxEl: HTMLElement, k: string) {
     const sx = e.clientX, sy = e.clientY
-    let id: number | null = null, startX = 0, startY = 0
+    let id: number | null = null, startX = 0, startY = 0, z = 1
     const move = (ev: PointerEvent) => {
       if (id == null && Math.abs(ev.clientX - sx) + Math.abs(ev.clientY - sy) > 5) {
         const pr = pageRef.current ? pageRef.current.getBoundingClientRect() : null
         if (!pr) return
+        // 종이는 화면 배율(Preview)만큼 커져 있다 — 화면 픽셀을 논리 좌표로 나눠 옮긴다.
+        z = pageRef.current && pageRef.current.offsetWidth > 0 ? pr.width / pageRef.current.offsetWidth : 1
         const r = boxEl.getBoundingClientRect(); const cs = window.getComputedStyle(boxEl)
         const bw = parseFloat(cs.borderTopWidth) || 0
         const bstyle = cs.borderTopStyle
         pushSnap(page.id, JSON.stringify({ els: page.els, conns: page.conns, strokes: page.strokes, detached: page.detached }))
         id = detachBox(page.id, k, {
-          x: Math.round(r.left - pr.left), y: Math.round(r.top - pr.top),
-          w: Math.round(r.width), h: Math.round(r.height),
+          x: Math.round((r.left - pr.left) / z), y: Math.round((r.top - pr.top) / z),
+          w: Math.round(r.width / z), h: Math.round(r.height / z),
           text: boxEl.textContent || '', fs: parseFloat(cs.fontSize) || 14,
           tcolor: cs.color, bold: parseInt(cs.fontWeight, 10) >= 600,
           fill: cs.backgroundColor,
           borderColor: (bw > 0 && bstyle !== 'none') ? cs.borderTopColor : undefined,
           borderWidth: (bw > 0 && bstyle !== 'none') ? bw : undefined,
         })
-        setSel(id); startX = Math.round(r.left - pr.left); startY = Math.round(r.top - pr.top)
+        setSel(id); startX = Math.round((r.left - pr.left) / z); startY = Math.round((r.top - pr.top) / z)
       }
-      if (id != null) moveEls(page.id, [{ id, x: startX + (ev.clientX - sx), y: startY + (ev.clientY - sy) }])
+      if (id != null) moveEls(page.id, [{ id, x: startX + (ev.clientX - sx) / z, y: startY + (ev.clientY - sy) / z }])
     }
     const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up) }
     window.addEventListener('pointermove', move); window.addEventListener('pointerup', up)

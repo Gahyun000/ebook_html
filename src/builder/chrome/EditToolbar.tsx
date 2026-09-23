@@ -10,6 +10,7 @@ import { useAutosave } from '../../persistence/autosave'
 import { useBuilder, type PaperType } from '../../state/store'
 import { PAPER_OPTIONS } from '../../cards/paper'
 import type { FreeEl } from '../../state/store'
+import { mergeCovering, mergeRange, unmergeAt } from '../../canvas/tableOps'
 
 let FMT: Partial<FreeEl> | null = null
 
@@ -89,6 +90,54 @@ function ShapeTool() {
   )
 }
 
+/**
+ * 표 도구 — 도구줄 둘째 줄(EVER-SKETCH1 b721df0 TableTools, 양식 슬롯·로드맵 안내는 뺐다).
+ *
+ * **표를 안 골랐을 때도 사라지지 않는다.** 고르는 순간 묶음이 새로 생기면 도구줄이 높아지고,
+ * 그만큼 아래 문서가 통째로 내려간다(원본 실측 42px). 칸을 끌던 사람은 한 줄 아래까지 고르게 된다.
+ * 끌어 고른 범위가 몇 칸인지도 여기서 말해 준다.
+ */
+function TableTools() {
+  const { el, patch } = useSelEl()
+  const tableSel = useCanvasUI((s) => s.tableSel)
+  const table = el && el.type === 'table' ? el : null
+
+  if (!table) {
+    return (
+      <span className="ax-grp gs off">
+        <span className="lab">표</span>
+        <button className="tbtn" disabled title="표를 고르면 쓸 수 있어요">⤢ 병합</button>
+        <button className="tbtn" disabled title="표를 고르면 쓸 수 있어요">⤡ 해제</button>
+        <span className="tbtn-hint">표의 칸을 고르세요</span>
+      </span>
+    )
+  }
+
+  const ts = tableSel && tableSel.elId === table.id ? tableSel : null
+  const rows = ts ? Math.abs(ts.r1 - ts.r0) + 1 : 0
+  const cols = ts ? Math.abs(ts.c1 - ts.c0) + 1 : 0
+  const ranged = rows * cols > 1
+  const onMerged = !!ts && !!mergeCovering(table.merges, ts.r1, ts.c1)
+  const why = !ts ? '표 안에서 칸을 클릭하세요'
+    : !ranged ? '두 칸 이상을 끌어서 고르세요'
+    : `${rows}행 ${cols}열을 하나로 합칩니다`
+
+  return (
+    <span className="ax-grp gs">
+      <span className="lab">표</span>
+      <button className="tbtn" title={why} disabled={!ranged}
+        onClick={() => { if (ts) patch(mergeRange(table, ts.r0, ts.c0, ts.r1, ts.c1)) }}>⤢ 병합</button>
+      <button className="tbtn" title={onMerged ? '이 칸의 병합을 풉니다' : '병합된 칸을 고르세요'}
+        disabled={!onMerged}
+        onClick={() => { if (ts) patch(unmergeAt(table, ts.r1, ts.c1)) }}>⤡ 해제</button>
+      <span className="tbtn-hint">
+        {ts ? (ranged ? `${rows}×${cols} 선택` : `${Math.min(ts.r0, ts.r1) + 1}행 ${Math.min(ts.c0, ts.c1) + 1}열`)
+          : '칸을 끌어서 선택'}
+      </span>
+    </span>
+  )
+}
+
 export default function EditToolbar() {
   const K = useKey()
   const tool = useCanvasUI((s) => s.tool)
@@ -144,7 +193,13 @@ export default function EditToolbar() {
   }
 
   return (
+    /* 두 줄로 나눈다(EVER-SKETCH1 b721df0).
+       첫 줄 = **늘 쓰는 만들기 도구**(그리기·도형·펜). 무엇을 골랐든 그대로다.
+       둘째 줄 = **고른 것에 따라 달라지는 도구**(지금은 표). 고른 게 없어도 자리를 지킨다 —
+       있다가 없어지면 도구줄 높이가 변하고 그만큼 아래 문서가 움직인다.
+       (PPT 식 글자·채우기 도구는 4단계에서 이 줄에 들어온다.) */
     <div className="ax-tb">
+     <div className="ax-tbrow">
       <button className="ib" title={`실행취소 (${K('mod+Z')})`} onClick={() => emit('ebook:undo')}>↺</button>
       <button className="ib" title={`다시실행 (${K('mod+shift+Z')})`} onClick={() => emit('ebook:redo')}>↻</button>
       <button className={'ib save-tb state-' + saveStatus + (flash ? ' flash' : '')} title={saveTitle} aria-label="지금 저장" onClick={doSave}>
@@ -188,7 +243,11 @@ export default function EditToolbar() {
           <option value={36}>크게</option>
         </select>
       </span>
+     </div>
 
+     <div className="ax-tbrow ctx">
+      <TableTools />
+     </div>
     </div>
   )
 }

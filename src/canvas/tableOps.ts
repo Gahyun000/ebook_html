@@ -5,6 +5,8 @@ export type Merge = { r: number; c: number; rs: number; cs: number }
 type Align = 'left' | 'center' | 'right'
 type VAlign = 'top' | 'middle' | 'bottom'
 type CAlign = Record<string, Align>
+// 셀 단위 맵은 모두 "r_c" 키를 쓴다. calign(가로정렬)·cvalign(세로정렬)·cfs(글자크기)·cbg(배경색)가 같은 규칙이다.
+type CellMap<T> = Record<string, T>
 type CVAlign = Record<string, VAlign>
 type CFs = Record<string, number>
 
@@ -35,9 +37,36 @@ export function coveredSet(merges: Merge[] | undefined): Set<string> {
   return s
 }
 
-// 셀 좌표를 키로 쓰는 맵(가로정렬·세로정렬·글자크기)을 행/열 삽입·삭제에 맞춰 옮긴다.
-function remapCellMap<T>(map: Record<string, T> | undefined, fn: (r: number, c: number) => [number, number] | null): Record<string, T> {
-  const out: Record<string, T> = {}
+// 열 너비·행 높이는 **비율(가중치) 배열**이다. px 가 아니다. (EVER-SKETCH1 859c9e0 · b721df0)
+// px 로 두면 표 전체 크기를 바꾸는 순간 칸 합이 표 폭과 어긋나 마지막 칸이 잘린다.
+// 길이가 열/행 수와 다르면(구 문서·잘못된 입력) 균등 분할로 되돌린다 — 조용히 어긋난 폭을
+// 유지하는 것보다 눈에 띄게 균등해지는 편이 고치기 쉽다.
+// (화면 grid 용 문자열. PPT 내보내기는 숫자 배열이 필요해서 아래 trackSizes 를 쓴다.)
+export function sizeTracks(arr: number[] | undefined, n: number): string {
+  const ok = !!arr && arr.length === n && arr.every((v) => typeof v === 'number' && v > 0 && isFinite(v))
+  return ok ? (arr as number[]).map((v) => v + 'fr').join(' ') : `repeat(${n}, 1fr)`
+}
+
+// 새 행/열의 크기는 **바로 그 자리에 있던 것과 같게** 잡는다(끝에 붙이면 마지막 것과 같게).
+// 1 로 고정하면 넓은 열 옆에 열을 넣었을 때 그 칸만 좁아져 표가 어긋나 보인다.
+function insertSize(arr: number[] | undefined, at: number, n: number): number[] | undefined {
+  if (!arr || arr.length !== n) return undefined
+  const out = arr.slice()
+  out.splice(at, 0, arr[Math.min(Math.max(at, 0), arr.length - 1)] || 1)
+  return out
+}
+function removeSize(arr: number[] | undefined, at: number, n: number): number[] | undefined {
+  if (!arr || arr.length !== n) return undefined
+  const out = arr.slice()
+  out.splice(at, 1)
+  return out.length ? out : undefined
+}
+
+// 행·열이 늘거나 줄면 셀 좌표가 통째로 밀린다. 좌표를 키로 쓰는 맵은 전부 다시 매핑해야 한다.
+// **이 함수를 거치지 않는 셀 맵을 새로 추가하면, 행을 하나 추가하는 순간
+// 그 맵의 값이 한 칸씩 어긋난다**(칸 색이 엉뚱한 줄로 밀리는 식).
+function remapCells<T>(map: CellMap<T> | undefined, fn: (r: number, c: number) => [number, number] | null): CellMap<T> {
+  const out: CellMap<T> = {}
   if (map) for (const k of Object.keys(map)) {
     const [r, c] = k.split('_').map(Number)
     const nk = fn(r, c)
@@ -46,13 +75,15 @@ function remapCellMap<T>(map: Record<string, T> | undefined, fn: (r: number, c: 
   return out
 }
 
-// 셀 서식 맵은 세 개가 항상 함께 움직여야 한다. 하나라도 빠뜨리면 행을 지운 뒤
-// 정렬만 따라오고 글자 크기는 엉뚱한 칸에 남는 식으로 표가 어긋난다.
+// 셀 서식 맵은 네 개가 항상 함께 움직여야 한다. 하나라도 빠뜨리면 행을 지운 뒤
+// 정렬만 따라오고 글자 크기·칸 색은 엉뚱한 칸에 남는 식으로 표가 어긋난다.
+// **셀 맵을 새로 추가하면 반드시 여기에도 넣는다.**
 function remapCellStyles(el: FreeEl, fn: (r: number, c: number) => [number, number] | null): Partial<FreeEl> {
   return {
-    calign: remapCellMap<Align>(el.calign, fn),
-    cvalign: remapCellMap<VAlign>(el.cvalign, fn),
-    cfs: remapCellMap<number>(el.cfs, fn),
+    calign: remapCells<Align>(el.calign, fn),
+    cvalign: remapCells<VAlign>(el.cvalign, fn),
+    cfs: remapCells<number>(el.cfs, fn),
+    cbg: remapCells<string>(el.cbg, fn),
   }
 }
 
@@ -63,7 +94,7 @@ export function addRow(el: FreeEl, at: number): Partial<FreeEl> {
   const merges = (el.merges || []).map((m) => ({ ...m }))
   for (const m of merges) { if (at <= m.r) m.r++; else if (at <= m.r + m.rs - 1) m.rs++ }
   const st = remapCellStyles(el, (r, c) => [r >= at ? r + 1 : r, c])
-  return { rows: R + 1, cells: nc, merges, ...st }
+  return { rows: R + 1, cells: nc, merges, ...st, rowh: insertSize(el.rowh, at, R) }
 }
 
 export function delRow(el: FreeEl, at0: number): Partial<FreeEl> {
@@ -81,7 +112,7 @@ export function delRow(el: FreeEl, at0: number): Partial<FreeEl> {
     if (m.rs >= 1 && m.cs >= 1 && !(m.rs === 1 && m.cs === 1)) merges.push(m)
   }
   const st = remapCellStyles(el, (r, c) => (r === at ? null : [r > at ? r - 1 : r, c]))
-  return { rows: R - 1, cells: nc, merges, ...st }
+  return { rows: R - 1, cells: nc, merges, ...st, rowh: removeSize(el.rowh, at, R) }
 }
 
 export function addCol(el: FreeEl, at: number): Partial<FreeEl> {
@@ -90,7 +121,7 @@ export function addCol(el: FreeEl, at: number): Partial<FreeEl> {
   const merges = (el.merges || []).map((m) => ({ ...m }))
   for (const m of merges) { if (at <= m.c) m.c++; else if (at <= m.c + m.cs - 1) m.cs++ }
   const st = remapCellStyles(el, (r, c) => [r, c >= at ? c + 1 : c])
-  return { cols: C + 1, cells: nc, merges, ...st }
+  return { cols: C + 1, cells: nc, merges, ...st, colw: insertSize(el.colw, at, C) }
 }
 
 export function delCol(el: FreeEl, at0: number): Partial<FreeEl> {
@@ -106,7 +137,7 @@ export function delCol(el: FreeEl, at0: number): Partial<FreeEl> {
     if (m.rs >= 1 && m.cs >= 1 && !(m.rs === 1 && m.cs === 1)) merges.push(m)
   }
   const st = remapCellStyles(el, (r, c) => (c === at ? null : [r, c > at ? c - 1 : c]))
-  return { cols: C - 1, cells: nc, merges, ...st }
+  return { cols: C - 1, cells: nc, merges, ...st, colw: removeSize(el.colw, at, C) }
 }
 
 export function mergeRange(el: FreeEl, r0: number, c0: number, r1: number, c1: number): Partial<FreeEl> {

@@ -10,7 +10,8 @@ import { useCanvasUI } from '../state/canvasUI'
 import { mkFreeEl, pushSnap, FCOLORS } from './model'
 import { overlayOpen } from '../ui/overlay'
 import NoteBlocks from '../builder/NoteBlocks'
-import { coveredSet, mergeCovering } from './tableOps'
+import { coveredSet, mergeCovering, sizeTracks } from './tableOps'
+import { cellBackground, cellTextColor } from './cellColor'
 import ColorPicker from '../builder/chrome/ColorPicker'
 
 interface Props { page: Page; W: number; H: number; SC: number; interactive: boolean }
@@ -213,6 +214,16 @@ export default function FreeLayer({ page, W, H, interactive }: Props) {
     return () => window.removeEventListener('pointerdown', onDown, true)
   }, [interactive])
   const active = interactive
+
+  // 종이는 Preview 가 CSS transform 으로 배율을 곱해 그린다(맞춤·사람이 정한 배율).
+  // 그때 마우스가 지나간 **화면 픽셀은 페이지 좌표와 다르다.** 배율로 나누지 않으면
+  // 드래그·크기조절·회전이 전부 커서와 어긋난다(EVER-SKETCH1 b721df0 zoomOf).
+  // rect.width 는 이미 배율이 반영된 값이라 논리 폭 W 로 나누면 그게 곧 현재 배율이다.
+  const zoomOf = (r: { width: number }) => (r.width > 0 ? r.width / W : 1)
+  const layerZoom = (from: Element) => {
+    const n = from.closest('.freelayer') as HTMLElement | null
+    return n ? zoomOf(n.getBoundingClientRect()) : 1
+  }
   const markerId = 'fah' + page.id
   const markerStartId = 'fas' + page.id
 
@@ -336,11 +347,42 @@ export default function FreeLayer({ page, W, H, interactive }: Props) {
     inp.click()
   }
 
+  // 칸 끌기 선택 — 끌고 지나간 칸까지 범위를 넓힌다(EVER-SKETCH1 b721df0).
+  //
+  // 좌표로 계산하지 않고 **elementFromPoint 로 실제 칸을 짚는다.**
+  // 열 너비(colw)·행 높이(rowh)·병합·화면 배율이 섞이면 좌표 산술로는 어느 칸인지 못 맞춘다.
+  // 병합에 덮인 자리는 앵커 칸이 그 영역을 차지하므로 앵커 좌표가 그대로 나온다.
+  function startCellDrag(elId: number, r0: number, c0: number, from: Element) {
+    // 같은 쪽이 필름 미리보기에도 그려진다 — 거기 칸들도 data-tel 이 같다.
+    // 레이어를 확인하지 않으면 커서가 미리보기 위를 지나는 순간 엉뚱한 칸이 잡힌다.
+    const layer = from.closest('.freelayer')
+    let last = r0 + '_' + c0
+    const move = (ev: PointerEvent) => {
+      const node = document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null
+      const cell = node ? (node.closest('[data-tel]') as HTMLElement | null) : null
+      if (!cell || cell.dataset.tel !== String(elId)) return
+      if (!layer || !layer.contains(cell)) return
+      const r = Number(cell.dataset.r), c = Number(cell.dataset.c)
+      if (!Number.isFinite(r) || !Number.isFinite(c)) return
+      const key = r + '_' + c
+      if (key === last) return
+      last = key
+      setTableSel({ elId, r0, c0, r1: r, c1: c })
+    }
+    const up = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+  }
+
   function onLayerDown(e: React.PointerEvent<HTMLDivElement>) {
     if (!active) return
     if (e.target !== e.currentTarget) return
     const rect = e.currentTarget.getBoundingClientRect()
-    const x = e.clientX - rect.left, y = e.clientY - rect.top
+    const z = zoomOf(rect)
+    const x = (e.clientX - rect.left) / z, y = (e.clientY - rect.top) / z
     if (tool === 'eraser') {
       e.preventDefault()
       let cur = page.strokes.slice()
@@ -351,7 +393,7 @@ export default function FreeLayer({ page, W, H, interactive }: Props) {
         if (keep.length !== cur.length) { if (!did) { snap(); did = true } cur = keep; setCanvas(page.id, { els: page.els, conns: page.conns, strokes: cur }) }
       }
       erase(x, y)
-      const move = (ev: PointerEvent) => erase(ev.clientX - rect.left, ev.clientY - rect.top)
+      const move = (ev: PointerEvent) => erase((ev.clientX - rect.left) / z, (ev.clientY - rect.top) / z)
       const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up) }
       window.addEventListener('pointermove', move); window.addEventListener('pointerup', up); return
     }
@@ -359,7 +401,7 @@ export default function FreeLayer({ page, W, H, interactive }: Props) {
       e.preventDefault(); snap()
       const isHl = tool === 'highlighter'
       const pts: [number, number][] = [[x, y]]; setPenPts([...pts])
-      const move = (ev: PointerEvent) => { pts.push([ev.clientX - rect.left, ev.clientY - rect.top]); setPenPts([...pts]) }
+      const move = (ev: PointerEvent) => { pts.push([(ev.clientX - rect.left) / z, (ev.clientY - rect.top) / z]); setPenPts([...pts]) }
       const up = () => {
         // 펜=자유 잉크 획만(도형/화살표 자동 변환 없음 → 지우개로 지워짐). 형광펜도 획.
         if (isHl) addStroke(page.id, { points: pts, color: hlColor, w: hlWidth, hl: true })
@@ -375,10 +417,10 @@ export default function FreeLayer({ page, W, H, interactive }: Props) {
       setSel(null); setConnSrc(null); setSelConn(null); endEditing()
       const s0 = { x, y }
       setMarquee({ x, y, w: 0, h: 0 })
-      const mv = (ev: PointerEvent) => { const cx = ev.clientX - rect.left, cy = ev.clientY - rect.top; setMarquee({ x: Math.min(s0.x, cx), y: Math.min(s0.y, cy), w: Math.abs(cx - s0.x), h: Math.abs(cy - s0.y) }) }
+      const mv = (ev: PointerEvent) => { const cx = (ev.clientX - rect.left) / z, cy = (ev.clientY - rect.top) / z; setMarquee({ x: Math.min(s0.x, cx), y: Math.min(s0.y, cy), w: Math.abs(cx - s0.x), h: Math.abs(cy - s0.y) }) }
       const up = (ev: PointerEvent) => {
         window.removeEventListener('pointermove', mv); window.removeEventListener('pointerup', up)
-        const cx = ev.clientX - rect.left, cy = ev.clientY - rect.top
+        const cx = (ev.clientX - rect.left) / z, cy = (ev.clientY - rect.top) / z
         const mx = Math.min(s0.x, cx), my = Math.min(s0.y, cy), mw = Math.abs(cx - s0.x), mh = Math.abs(cy - s0.y)
         setMarquee(null)
         if (mw > 4 && mh > 4) {
@@ -395,7 +437,8 @@ export default function FreeLayer({ page, W, H, interactive }: Props) {
   function onLayerMove(e: React.PointerEvent<HTMLDivElement>) {
     if (!active || tool !== 'connect' || connSrc === null) { if (mouse) setMouse(null); return }
     const rect = e.currentTarget.getBoundingClientRect()
-    setMouse({ x: e.clientX - rect.left, y: e.clientY - rect.top })
+    const z = zoomOf(rect)
+    setMouse({ x: (e.clientX - rect.left) / z, y: (e.clientY - rect.top) / z })
   }
   function onElDown(e: React.PointerEvent<HTMLDivElement>, el: FreeEl) {
     if (!active) return
@@ -426,8 +469,9 @@ export default function FreeLayer({ page, W, H, interactive }: Props) {
     const movableIds = dragIds.filter((id) => { const d = page.els.find((x) => x.id === id); return d && !d.locked })
     const starts = movableIds.map((id) => { const d = page.els.find((x) => x.id === id); return { id, x: d ? d.x : 0, y: d ? d.y : 0 } })
     const sx = e.clientX, sy = e.clientY; let moved = false
+    const lz = layerZoom(e.currentTarget)
     const move = (ev: PointerEvent) => {
-      const dx = ev.clientX - sx, dy = ev.clientY - sy
+      const dx = (ev.clientX - sx) / lz, dy = (ev.clientY - sy) / lz
       if (Math.abs(dx) + Math.abs(dy) > 4) { if (!moved) snap(); moved = true }
       if (single) {
         const s0 = starts[0]
@@ -448,6 +492,7 @@ export default function FreeLayer({ page, W, H, interactive }: Props) {
     if (!rect) return
     const th = (el.rot || 0) * Math.PI / 180, cos = Math.cos(th), sin = Math.sin(th)
     const R = (px: number, py: number) => ({ x: px * cos - py * sin, y: px * sin + py * cos })
+    const z = zoomOf(rect)
     const ow = el.w, oh = el.h, cx0 = el.x + ow / 2, cy0 = el.y + oh / 2
     const signX = dir.indexOf('e') >= 0 ? 1 : dir.indexOf('w') >= 0 ? -1 : 0
     const signY = dir.indexOf('s') >= 0 ? 1 : dir.indexOf('n') >= 0 ? -1 : 0
@@ -456,7 +501,7 @@ export default function FreeLayer({ page, W, H, interactive }: Props) {
     const MINW = 20, MINH = 16; let did = false
     const move = (ev: PointerEvent) => {
       if (!did) { snap(); did = true }
-      const wx = (ev.clientX - rect.left) - Ax, wy = (ev.clientY - rect.top) - Ay
+      const wx = (ev.clientX - rect.left) / z - Ax, wy = (ev.clientY - rect.top) / z - Ay
       const lx = wx * cos + wy * sin, ly = -wx * sin + wy * cos
       const nw = signX !== 0 ? Math.max(MINW, Math.abs(lx)) : ow
       const nh = signY !== 0 ? Math.max(MINH, Math.abs(ly)) : oh
@@ -474,10 +519,11 @@ export default function FreeLayer({ page, W, H, interactive }: Props) {
     const layer = (e.currentTarget as HTMLElement).closest('.freelayer') as HTMLElement | null
     const rect = layer ? layer.getBoundingClientRect() : null
     if (!rect) return
+    const z = zoomOf(rect)
     const cx = el.x + el.w / 2, cy = el.y + el.h / 2; let did = false
     const move = (ev: PointerEvent) => {
       if (!did) { snap(); did = true }
-      const px = ev.clientX - rect.left, py = ev.clientY - rect.top
+      const px = (ev.clientX - rect.left) / z, py = (ev.clientY - rect.top) / z
       let ang = Math.atan2(py - cy, px - cx) * 180 / Math.PI + 90
       ang = ((Math.round(ang) % 360) + 360) % 360
       if (ev.shiftKey) ang = Math.round(ang / 15) * 15 % 360
@@ -497,10 +543,11 @@ export default function FreeLayer({ page, W, H, interactive }: Props) {
     const ax = dir.indexOf('w') >= 0 ? bx2 : bx
     const ay = dir.indexOf('n') >= 0 ? by2 : by
     const starts = sel0.map((el) => ({ id: el.id, x: el.x, y: el.y, w: el.w, h: el.h }))
+    const gz = layerZoom(e.currentTarget)
     const sx0 = e.clientX, sy0 = e.clientY; let did = false
     const move = (ev: PointerEvent) => {
       if (!did) { snap(); did = true }
-      const dx = ev.clientX - sx0, dy = ev.clientY - sy0
+      const dx = (ev.clientX - sx0) / gz, dy = (ev.clientY - sy0) / gz
       let nBW = BW, nBH = BH
       if (dir.indexOf('e') >= 0) nBW = Math.max(20, BW + dx)
       if (dir.indexOf('w') >= 0) nBW = Math.max(20, BW - dx)
@@ -523,12 +570,13 @@ export default function FreeLayer({ page, W, H, interactive }: Props) {
     if (!sel0.length) return
     const bx = Math.min(...sel0.map((el) => el.x)), by = Math.min(...sel0.map((el) => el.y))
     const bx2 = Math.max(...sel0.map((el) => el.x + el.w)), by2 = Math.max(...sel0.map((el) => el.y + el.h))
+    const z = zoomOf(rect)
     const gcx = (bx + bx2) / 2, gcy = (by + by2) / 2
     const starts = sel0.map((el) => ({ id: el.id, cx: el.x + el.w / 2, cy: el.y + el.h / 2, w: el.w, h: el.h, rot: el.rot || 0 }))
-    const a0 = Math.atan2((e.clientY - rect.top) - gcy, (e.clientX - rect.left) - gcx); let did = false
+    const a0 = Math.atan2((e.clientY - rect.top) / z - gcy, (e.clientX - rect.left) / z - gcx); let did = false
     const move = (ev: PointerEvent) => {
       if (!did) { snap(); did = true }
-      const a = Math.atan2((ev.clientY - rect.top) - gcy, (ev.clientX - rect.left) - gcx)
+      const a = Math.atan2((ev.clientY - rect.top) / z - gcy, (ev.clientX - rect.left) / z - gcx)
       const d = a - a0, dd = d * 180 / Math.PI
       transformEls(page.id, starts.map((m0) => {
         const rxp = m0.cx - gcx, ryp = m0.cy - gcy
@@ -547,11 +595,12 @@ export default function FreeLayer({ page, W, H, interactive }: Props) {
     const layer = (e.currentTarget as HTMLElement).closest('.freelayer') as HTMLElement | null
     const rect = layer ? layer.getBoundingClientRect() : null
     if (!rect) return
-    const move = (ev: PointerEvent) => { setNodeDrag({ fromId: el.id, x: ev.clientX - rect.left, y: ev.clientY - rect.top }) }
+    const z = zoomOf(rect)
+    const move = (ev: PointerEvent) => { setNodeDrag({ fromId: el.id, x: (ev.clientX - rect.left) / z, y: (ev.clientY - rect.top) / z }) }
     const up = (ev: PointerEvent) => {
       window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up)
       setNodeDrag(null)
-      const x = ev.clientX - rect.left, y = ev.clientY - rect.top
+      const x = (ev.clientX - rect.left) / z, y = (ev.clientY - rect.top) / z
       const target = page.els.find((t) => t.id !== el.id && x >= t.x && x <= t.x + t.w && y >= t.y && y <= t.y + t.h)
       snap()
       if (target) { addConn(page.id, { from: el.id, to: target.id }); setSel(target.id); return }
@@ -576,12 +625,12 @@ export default function FreeLayer({ page, W, H, interactive }: Props) {
     e.preventDefault(); e.stopPropagation()
     const svg = e.currentTarget.ownerSVGElement
     if (!svg) return
-    const rect = svg.getBoundingClientRect(); let did = false, moved = false
+    const rect = svg.getBoundingClientRect(); const z = zoomOf(rect); let did = false, moved = false
     const sx = e.clientX, sy = e.clientY
     const move = (ev: PointerEvent) => {
       if (Math.abs(ev.clientX - sx) + Math.abs(ev.clientY - sy) <= 4) return
       moved = true
-      const x = ev.clientX - rect.left, y = ev.clientY - rect.top
+      const x = (ev.clientX - rect.left) / z, y = (ev.clientY - rect.top) / z
       if (!did) { snap(); did = true } updateConn(page.id, i, { x, y }); setBending({ x, y })
     }
     const up = () => { setBending(null); window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); if (!moved) setSelConn(i) }
@@ -712,7 +761,7 @@ export default function FreeLayer({ page, W, H, interactive }: Props) {
                   const ts = (tableSel && tableSel.elId === el.id) ? tableSel : null
                   const inSel = (r: number, c: number) => !!ts && r >= Math.min(ts.r0, ts.r1) && r <= Math.max(ts.r0, ts.r1) && c >= Math.min(ts.c0, ts.c1) && c <= Math.max(ts.c0, ts.c1)
                   return (
-                    <div className="feltable" style={{ display: 'grid', gridTemplateColumns: `repeat(${C}, 1fr)`, gridTemplateRows: `repeat(${R}, 1fr)`, width: '100%', height: '100%' }}>
+                    <div className="feltable" style={{ display: 'grid', gridTemplateColumns: sizeTracks(el.colw, C), gridTemplateRows: sizeTracks(el.rowh, R), width: '100%', height: '100%', position: 'relative' }}>
                       {Array.from({ length: R * C }).map((_, k) => {
                         const r = Math.floor(k / C), c = k % C
                         if (cov.has(r + '_' + c)) return null
@@ -721,10 +770,17 @@ export default function FreeLayer({ page, W, H, interactive }: Props) {
                         const al = (el.calign && el.calign[r + '_' + c]) || undefined
                         const va = (el.cvalign && el.cvalign[r + '_' + c]) || undefined
                         const cfs = (el.cfs && el.cfs[r + '_' + c]) || el.fs
+                        // 편집 중에는 칸 선택 하이라이트를 걷는다 — 글자와 겹쳐 읽기 어렵다.
                         const sel = !editingThis && inSel(r, c)
+                        const isHead = head && r === 0
+                        // 칸 색(cbg). 고른 칸 하이라이트가 늘 이긴다. 색 규칙은 PPT 내보내기와 같은 함수.
+                        const bg = el.cbg && el.cbg[r + '_' + c]
+                        const cellBg = sel ? '#dbe7ff'
+                          : (bg ? cellBackground(bg) : (isHead ? '#f2f5fa' : '#fff'))
                         return (
-                          <div key={k} className={'feltd' + (sel ? ' cellsel' : '')} data-rc={r + '_' + c} suppressContentEditableWarning
-                            style={{ border: bw + 'px solid ' + border, fontSize: cfs, padding: '3px 5px', overflow: 'hidden', background: head && r === 0 ? '#f2f5fa' : '#fff', fontWeight: head && r === 0 ? 700 : 400, textAlign: al, gridColumn: m ? `${c + 1} / span ${m.cs}` : `${c + 1}`, gridRow: m ? `${r + 1} / span ${m.rs}` : `${r + 1}`, userSelect: editingThis ? 'text' : 'none', cursor: editingThis ? 'text' : 'default', ...(va ? { display: 'flex', flexDirection: 'column' as const, justifyContent: va === 'middle' ? 'center' : va === 'bottom' ? 'flex-end' : 'flex-start' } : null) }}
+                          <div key={k} className={'feltd' + (sel ? ' cellsel' : '')} suppressContentEditableWarning
+                            data-tel={el.id} data-r={r} data-c={c} data-rc={r + '_' + c}
+                            style={{ border: bw + 'px solid ' + border, fontSize: cfs, padding: '3px 5px', overflow: 'hidden', background: cellBg, color: sel ? undefined : cellTextColor(bg), fontWeight: isHead ? 700 : 400, textAlign: al, gridColumn: m ? `${c + 1} / span ${m.cs}` : `${c + 1}`, gridRow: m ? `${r + 1} / span ${m.rs}` : `${r + 1}`, userSelect: editingThis ? 'text' : 'none', cursor: editingThis ? 'text' : 'default', ...(va ? { display: 'flex', flexDirection: 'column' as const, justifyContent: va === 'middle' ? 'center' : va === 'bottom' ? 'flex-end' : 'flex-start' } : null) }}
                             contentEditable={editingThis}
                             onKeyDown={editingThis ? (e) => {
                               const to = (nr: number, nc: number) => { e.preventDefault(); e.stopPropagation(); endEditing(); setTableSel({ elId: el.id, r0: nr, c0: nc, r1: nr, c1: nc }) }
@@ -740,21 +796,26 @@ export default function FreeLayer({ page, W, H, interactive }: Props) {
                               if (e.shiftKey || e.metaKey || e.ctrlKey) return
                               e.stopPropagation()
                               e.preventDefault()
-                              if (!tableActive) setSel(el.id)   // 표를 아직 안 골랐으면 여기서 고른다(표 이동은 테두리·방향키)
+                              // **다른 요소를 편집 중이었으면 거기서 끝낸다**(EVER-SKETCH1 8cb80f5).
+                              // 칸의 onBlur 는 값만 커밋하고 `editing` 은 그대로 둔다 — 그러면 옛 표가
+                              // 계속 편집 모드로 남고, editing 을 보는 겹(손잡이 등)도 계속 숨는다.
+                              if (editing != null && editing !== el.id) endEditing()
+                              // 칸 위 누름은 **칸 선택**이다. 표를 이 자리에서 옮기지 않는다 —
+                              // 누르자마자 끄는 사람에게 표가 통째로 움직이면 '드래그가 안 되는' 것으로 보인다.
+                              // 표 이동은 ⠿ 손잡이(.tbl-move)가 맡는다.
+                              if (!tableActive) setSel(el.id)
                               setTableSel({ elId: el.id, r0: r, c0: c, r1: r, c1: c })
-                              // 끄는 동안 커서 밑의 칸을 좌표로 되찾는다. 형제 칸의 pointerenter 에 기대면
-                              // 브라우저가 눌린 포인터를 처음 칸에 붙잡아 두는 순간 범위가 안 늘어난다.
-                              const table = (e.currentTarget as HTMLElement).parentElement
-                              const move = (ev: PointerEvent) => {
-                                const hit = document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null
-                                const td = hit && hit.closest('[data-rc]') as HTMLElement | null
-                                if (!td || !table || td.parentElement !== table) return   // 다른 표·바깥으로 나가면 그대로 둔다
-                                const rc = (td.dataset.rc || '').split('_').map(Number)
-                                if (rc.length !== 2 || Number.isNaN(rc[0])) return
-                                setTableSel({ elId: el.id, r0: r, c0: c, r1: rc[0], c1: rc[1] })
-                              }
-                              const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up) }
-                              window.addEventListener('pointermove', move); window.addEventListener('pointerup', up)
+                              startCellDrag(el.id, r, c, e.currentTarget)
+                            }}
+                            onDoubleClick={(e) => {
+                              // 더블클릭한 **그 칸**에 커서를 놓는다(EVER-SKETCH1 b721df0).
+                              // 예전엔 표 전체가 편집 모드로 바뀌기만 해서, 글자를 쓰려면 한 번 더 눌러야 했다.
+                              if (editingThis) return        // 이미 편집 중이면 기본 동작에 맡긴다
+                              if (!active || el.locked || tool !== 'select') return
+                              e.stopPropagation()
+                              startEditing(el.id)          // 이전 편집분을 먼저 저장하고 시작
+                              const node = e.currentTarget
+                              requestAnimationFrame(() => requestAnimationFrame(() => node.focus()))
                             }}
                             onFocus={editingThis ? (e) => {
                               const n = e.currentTarget
@@ -770,7 +831,7 @@ export default function FreeLayer({ page, W, H, interactive }: Props) {
                           >{val}</div>
                         )
                       })}
-                      {ts && !editingThis ? (() => {
+                      {ts && ts.elId === el.id && !editingThis ? (() => {
                         const R0 = Math.min(ts.r0, ts.r1), R1 = Math.max(ts.r0, ts.r1)
                         const C0 = Math.min(ts.c0, ts.c1), C1 = Math.max(ts.c0, ts.c1)
                         return <div className="feltsel" style={{ gridColumn: `${C0 + 1} / ${C1 + 2}`, gridRow: `${R0 + 1} / ${R1 + 2}`, border: '2px solid #2f6df6', margin: -1, borderRadius: 2, pointerEvents: 'none', zIndex: 3 }} />
@@ -877,6 +938,22 @@ export default function FreeLayer({ page, W, H, interactive }: Props) {
               onPointerDown={(e) => onGroupResizeDown(e, h.d)} />
           ))}
         </>)
+      })() : null}
+      {/* 표 이동 손잡이(⠿) — 자기 겹에 따로 그린다(EVER-SKETCH1 b721df0 · 자리는 8cb80f5).
+          표는 칸을 잡으면 **칸 선택**이 되므로 표 자체를 끌 곳이 따로 필요하다.
+          표 안(.feltable)에 두면 `.fel` 의 overflow:hidden 에 잘리고 첫 칸을 덮는다.
+          크기 손잡이 겹은 editing == null 일 때만 떠서 칸을 편집하는 동안 사라진다.
+          그래서 표의 왼쪽 위 **모서리 바깥**에, 자기 겹으로 선다. */}
+      {active && tool === 'select' && selEls.length === 1 && selEl != null ? (() => {
+        const se = page.els.find((e) => e.id === selEl)
+        if (!se || se.type !== 'table' || se.locked) return null
+        return (
+          <div style={{ position: 'absolute', left: se.x, top: se.y, width: se.w, height: se.h,
+                        pointerEvents: 'none', zIndex: 8 }}>
+            <div className="tbl-move" title="드래그해서 표 이동"
+              onPointerDown={(e) => { e.stopPropagation(); onElDown(e, se) }}>⠿</div>
+          </div>
+        )
       })() : null}
       {active && tool === 'select' && editing == null && hoverId != null && !selEls.includes(hoverId) ? (() => {
         const he = page.els.find((e) => e.id === hoverId)
