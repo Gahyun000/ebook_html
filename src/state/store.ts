@@ -1,5 +1,7 @@
 import { create } from 'zustand'
 import { cardByKey } from '../cards/registry'
+import { pageSize } from '../cards/sizing'
+import { mindmapParts } from '../cards/mindmapEls'
 import type { ImportedDoc } from '../import/htmlImport'
 import { polish } from '../builder/polish'
 import { dropHistory, popDocRedo, popDocSnap, pushDocRedo, pushDocSnap, pushDocUndoRaw } from '../canvas/history'
@@ -22,12 +24,19 @@ export type CalloutTone = 'info' | 'key' | 'warn'
 export interface Block { id: number; type: BlockType; text: string; bold?: boolean; italic?: boolean; done?: boolean; align?: 'left' | 'center' | 'right'; collapsed?: boolean; children?: Block[]; tone?: CalloutTone; color?: string; fs?: number }
 export type PageRole = 'cover' | 'toc' | 'content' | 'back'
 export interface DeckTocItem { sectionId: string; markN?: string; title: string; summary?: string; pageNo: string }
-export interface Page { id: number; cardKey: string; fields: Record<string, string>; free: boolean; els: FreeEl[]; conns: Conn[]; strokes: Stroke[]; paper?: PaperType; blocks?: Block[]; detached?: string[]; bg?: string; contd?: boolean; trans?: string; role?: PageRole; sectionId?: string; pageNo?: string; tocItems?: DeckTocItem[] }
+export interface Page { id: number; cardKey: string; fields: Record<string, string>; free: boolean; els: FreeEl[]; conns: Conn[]; strokes: Stroke[]; paper?: PaperType; blocks?: Block[]; detached?: string[]; bg?: string; contd?: boolean; trans?: string; role?: PageRole; sectionId?: string; pageNo?: string; tocItems?: DeckTocItem[]
+  /** 이 쪽이 **마인드맵에서 펼쳐진 것**이면 중심 도형의 id(EVER-SKETCH1 8c7c812).
+   *
+   *  펼치고 나면 그냥 도형과 선이라 「이게 마인드맵이었다」를 알 길이 없다.
+   *  그래서 「＋ 가지」를 어디에 붙일지도 모른다. 중심 id 하나만 적어 두면
+   *  **표시와 붙일 자리**를 한꺼번에 해결한다. */
+  mindmapCenter?: number }
 export interface CanvasData { els: FreeEl[]; conns: Conn[]; strokes: Stroke[]; detached?: string[] }
 export interface BuilderState {
   title: string; orientation: Orientation; font: string; size: SizePreset; theme: ThemeName
   pages: Page[]; selectedPageId: number | null
-  addCard: (cardKey: string) => void
+  /** `count` 는 마인드맵 가지 수 — 마인드맵은 카드가 아니라 **펼침**이다. */
+  addCard: (cardKey: string, count?: number) => void
   updateField: (pageId: number, key: string, value: string) => void
   removePage: (pageId: number) => void
   movePage: (pageId: number, dir: number) => void
@@ -46,6 +55,8 @@ export interface BuilderState {
   setSize: (s: SizePreset) => void
   setTheme: (t: ThemeName) => void
   toggleFree: (pageId: number) => void
+  /** 카드로 만들어 둔 마인드맵을 옮길 수 있는 요소들로 펼친다(되돌리기 가능). */
+  expandMindmap: (pageId: number) => void
   addEl: (pageId: number, el: FreeEl) => void
   updateEl: (pageId: number, elId: number, patch: Partial<FreeEl>) => void
   removeEl: (pageId: number, elId: number) => void
@@ -160,7 +171,7 @@ export const useBuilder = create<BuilderState>((set, get) => ({
   pages: [], selectedPageId: null,
   // 쪽이 **생기고·없어지고·자리를 바꾸는** 길에는 모두 문서 이력을 남긴다(EVER-SKETCH1 9eabded).
   // 쪽별 이력(canvas/history.ts)으로는 쪽 자체를 되돌릴 수 없어 ⌘Z 가 죽어 보였다.
-  addCard: (cardKey) => {
+  addCard: (cardKey, count) => {
     const g = get(); pushDocSnap(docSnap(g.pages, g.selectedPageId))
     return set((s) => {
     // 슬라이드 = 빈 캔버스 편집 페이지(구글 슬라이드식). 블록편집기 없이 요소로 직접 편집.
@@ -175,6 +186,18 @@ export const useBuilder = create<BuilderState>((set, get) => ({
        */
       const next = slideSpot(s.pages, s.selectedPageId)
       return { pages: [...s.pages.slice(0, next), sp, ...s.pages.slice(next)], selectedPageId: sp.id }
+    }
+    // 마인드맵은 **카드로 두지 않고 그 자리에서 요소로 펼친다**(EVER-SKETCH1 68a5627).
+    // 카드로 두면 그림이 SVG 한 덩어리라 가지 하나를 잡을 수가 없다 —
+    // 「마인드맵 위치 이동 및 사이즈 조정 안됨」이 이것이다. 자세한 이유는 cards/mindmapEls.ts.
+    if (cardKey === 'mindmap') {
+      const { W, H } = pageSize(s.orientation)
+      const { els, conns } = mindmapParts(defaultsFor('mindmap'), W, H, nextElId, count)
+      // 중심은 제목 다음(제목이 없으면 첫째)이다 — 가지들이 여기로 이어져 있다.
+      const center = conns.length ? conns[0].from : undefined
+      const mp: Page = { id: uid++, cardKey: 'slide', fields: {}, free: true,
+                         els, conns, strokes: [], blocks: [], bg: '', mindmapCenter: center }
+      return { pages: [...s.pages, mp], selectedPageId: mp.id }
     }
     const p: Page = { id: uid++, cardKey, fields: defaultsFor(cardKey), free: false, els: [], conns: [], strokes: [] }
     if (cardKey === 'note') {
@@ -249,6 +272,33 @@ export const useBuilder = create<BuilderState>((set, get) => ({
   setSize: (sz) => set({ size: sz }),
   setTheme: (t) => set({ theme: t }),
   toggleFree: (pageId) => set((s) => ({ pages: mapPage(s.pages, pageId, (p) => ({ ...p, free: !p.free })) })),
+
+  // 이미 **카드로 만들어 둔** 마인드맵을 요소로 펼친다(EVER-SKETCH1 68a5627).
+  //
+  // 새로 넣는 것은 addCard 가 처음부터 펼쳐서 주지만, 그 전에 만든 자료는 카드 그대로
+  // 남아 있다. 열 때 자동으로 바꾸지는 않는다 — 잠금 플래그 하나 떼는 것과 달리
+  // **내용을 통째로 다시 쓰는 일**이고, 필드를 정성껏 채워 둔 사람의 자료다.
+  // 사람이 누를 때만 바꾸고, 잘못 눌렀으면 실행 취소로 되돌린다.
+  //
+  // (ebook_html) 원본과 다르게 한 것 둘:
+  //  · 원본은 여기서 `mindmapCenter` 를 안 적어, 펼친 뒤에 「＋ 가지」가 안 떴다.
+  //    새로 넣는 길(addCard)과 같게 중심 id 를 적어 둔다.
+  //  · 원본은 누르기 전에 **쪽 이력**(pushSnap)만 남겼다. 쪽 이력은 요소·선만 들고 있어서
+  //    ⌘Z 를 누르면 요소는 사라지는데 `cardKey`·`fields` 는 안 돌아와 **마인드맵이 통째로 빈 쪽**이
+  //    됐다(스모크로 확인). 카드 종류가 바뀌는 일이므로 **문서 이력**에 남긴다(removePage 와 같다).
+  expandMindmap: (pageId) => set((s) => {
+    const src = s.pages.find((p) => p.id === pageId)
+    if (!src || src.cardKey !== 'mindmap') return {} as Partial<BuilderState>
+    pushDocSnap(docSnap(s.pages, s.selectedPageId))
+    const { W, H } = pageSize(s.orientation)
+    const { els, conns } = mindmapParts(src.fields || {}, W, H, nextElId)
+    const center = conns.length ? conns[0].from : undefined
+    return { pages: mapPage(s.pages, pageId, (p) => ({
+      ...p, cardKey: 'slide', fields: {}, free: true,
+      els: [...(p.els || []), ...els], conns: [...(p.conns || []), ...conns],
+      mindmapCenter: center,
+    })) }
+  }),
   addEl: (pageId, el) => set((s) => ({ pages: mapPage(s.pages, pageId, (p) => ({ ...p, els: [...p.els, el] })) })),
   updateEl: (pageId, elId, patch) => set((s) => ({ pages: mapPage(s.pages, pageId, (p) => ({ ...p, els: p.els.map((e) => (e.id === elId ? { ...e, ...patch } : e)) })) })),
   removeEl: (pageId, elId) => set((s) => ({ pages: mapPage(s.pages, pageId, (p) => ({ ...p, els: p.els.filter((e) => e.id !== elId), conns: p.conns.filter((c) => c.from !== elId && c.to !== elId) })) })),
