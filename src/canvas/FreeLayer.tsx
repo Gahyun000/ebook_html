@@ -1,5 +1,5 @@
 import type React from 'react'
-import { useState, useEffect, useRef } from 'react'
+import { Fragment, useState, useEffect, useRef } from 'react'
 import { flushSync } from 'react-dom'
 import { selectWordOrCaretAtPoint } from '../lib/wordSelect'
 import { intakeImage } from '../builder/imageIntake'
@@ -15,6 +15,7 @@ import NoteBlocks from '../builder/NoteBlocks'
 import { bandRange, coveredSet, dragTrack, growToMerges, mergeCovering, sizeTracks, trackSizes } from './tableOps'
 import { cellBackground, cellTextColor } from './cellColor'
 import ColorPicker from '../builder/chrome/ColorPicker'
+import { treeShape, descendantCount, knownOf, isTreePage } from '../cards/treeOps'
 
 interface Props { page: Page; W: number; H: number; SC: number; interactive: boolean }
 const ADDABLE = ['box', 'round', 'ellipse', 'diamond', 'triangle', 'hexagon', 'pentagon', 'parallelogram', 'chevron', 'arrowR', 'arrowL', 'arrowU', 'arrowD', 'star5', 'star4', 'banner', 'callout', 'text', 'sticky', 'image', 'icon', 'table', 'wordart', 'note']
@@ -111,6 +112,22 @@ function snapOf(pg: Page): string {
 }
 
 export default function FreeLayer({ page, W, H, interactive }: Props) {
+  // ── 접기는 **편집 화면에서만** 듣는다 (EVER-SKETCH1 c7effe6 · 원본 사용자 결정) ──────
+  //
+  // `hidden` 은 문서에 그대로 들어 있다. 여기서만 안 그린다.
+  // 미리보기·발표·내보내기(ExportLayer · exportPptx)는 `interactive={false}` 라
+  // **저절로 다 펴진다.** 작성자가 접어 둔 걸 잊어도 보는 사람이 덜 보는 일이 없다 —
+  // 원본에서는 「승인본이 작업본보다 적으면 안 된다」가 이 규칙의 이유였다(결재자가 덜 보는 일이 없다).
+  //
+  // 처음엔 「보이는 대로 내보내기」를 제안했다가 사용자가 「트리를 만든 데는 이유가
+  // 있는데 왜 접어서 나가나」라고 물어 뒤집었다.
+  const hiddenIds = new Set<number>()
+  if (interactive) for (const e of page.els) if (e && e.hidden) hiddenIds.add(e.id)
+  const shownEls = hiddenIds.size ? page.els.filter((e) => !hiddenIds.has(e.id)) : page.els
+  const shownConn = (c: { from: number; to: number }) => !hiddenIds.has(c.from) && !hiddenIds.has(c.to)
+  const treeFold = useBuilder((st) => st.treeFold)
+  const tshape = interactive && isTreePage(page) ? treeShape(page.els, page.conns, knownOf(page)) : null
+
   const tool = useCanvasUI((s) => s.tool)
   /**
    * **지금 무언가를 놓는 중인가**(도형·글상자·표·아이콘… · EVER-SKETCH1 46f155c).
@@ -817,6 +834,7 @@ export default function FreeLayer({ page, W, H, interactive }: Props) {
   }
 
   const conns = page.conns.map((c, i) => {
+    if (!shownConn(c)) return null
     const a = page.els.find((e) => e.id === c.from); const b = page.els.find((e) => e.id === c.to)
     if (!a || !b) return null
     const d = connPath(a, b, c)
@@ -834,6 +852,7 @@ export default function FreeLayer({ page, W, H, interactive }: Props) {
     )
   })
   const hits = active ? page.conns.map((c, i) => {
+    if (!shownConn(c)) return null
     const a = page.els.find((e) => e.id === c.from); const b = page.els.find((e) => e.id === c.to)
     if (!a || !b) return null
     return <path key={'hit' + i} d={connPath(a, b, c)} fill="none" stroke="transparent" strokeWidth={16} style={{ pointerEvents: 'stroke', cursor: 'pointer' }} onPointerDown={(e) => onLineDown(e, i)} />
@@ -878,7 +897,7 @@ export default function FreeLayer({ page, W, H, interactive }: Props) {
       </svg>
       {active && marquee ? <div className="marquee" style={{ left: marquee.x, top: marquee.y, width: marquee.w, height: marquee.h }} /> : null}
       {active && tool === 'connect' ? <div className="conn-hint">{connSrc === null ? '이을 도형을 클릭하세요 (첫 번째)' : '이어줄 다른 도형을 클릭하세요 (두 번째)'}</div> : null}
-      {page.els.map((el) => {
+      {shownEls.map((el) => {
         const isImg = el.type === 'image'
         const isTable = el.type === 'table'
         const isNote = el.type === 'note'
@@ -1132,6 +1151,33 @@ export default function FreeLayer({ page, W, H, interactive }: Props) {
           </div>
         )
       })}
+      {/* **가지 접기 손잡이**(EVER-SKETCH1 c7effe6). 상자 **밖**에 그린다 — `.fel` 이 `overflow:hidden` 이라
+          안에 넣으면 왼쪽으로 삐져나온 손잡이가 통째로 잘린다.
+          자식이 있는 상자에만, 그리고 **편집 화면에서만** 나온다.
+          접힌 상자 오른쪽의 「+N」은 **접어서 안 보이는 상자 수**다 — 몇 개를 덮었는지
+          모르면 접은 걸 잊는다. */}
+      {tshape ? shownEls.map((el) => {
+        if (el.echoOf != null) return null
+        const kids = (tshape.kids.get(el.id) || []).length
+        if (!kids) return null
+        const n = el.folded ? descendantCount(tshape, el.id) : 0
+        return (
+          <Fragment key={'fold' + el.id}>
+            {/* **상자 왼쪽 아래 모서리**에 붙인다. 원본에서 화면을 보고 두 번 옮겼다 —
+                왼쪽 가운데는 **들어오는 화살촉**과 겹쳤고, 위쪽은 요소 도구막대 자리다. */}
+            <button className="tree-fold" title={el.folded ? '펴기' : '접기'}
+              style={{ left: el.x + 1, top: el.y + el.h + 2 }}
+              onPointerDown={(e) => { e.stopPropagation() }}
+              onClick={(e) => { e.stopPropagation(); pushSnap(page.id, JSON.stringify({ els: page.els, conns: page.conns, strokes: page.strokes, detached: page.detached })); treeFold(page.id, el.id) }}>
+              {el.folded ? '▸' : '▾'}
+            </button>
+            {el.folded ? (
+              <span className="tree-plusn" aria-hidden="true" style={{ left: el.x + el.w + 6, top: el.y + 8 }}>+{n}</span>
+            ) : null}
+          </Fragment>
+        )
+      }) : null}
+
       {/* 크기 손잡이(EVER-SKETCH1 6817694 · 자리는 f2ce117).
           예전에는 「그 표의 칸이 골라져 있으면」 숨겼다. 그런데 표는 **한 번만 눌러도
           칸이 골라진다**(그게 맞는 동작이다). 그래서 손잡이를 보려면 Esc 를 눌러야 했고,

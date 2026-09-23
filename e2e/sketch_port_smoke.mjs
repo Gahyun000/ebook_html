@@ -800,6 +800,207 @@ STAGES.push(['5단계 · 오른쪽 패널 접이식 묶음', async () => {
   await openAcc('행')
 }])
 
+// ── 6단계 ─────────────────────────────────────────────────
+// 마인드맵을 요소로(68a5627 · 8c7c812) · 머메이드 TB·LR → 트리 요소(2b6abf0 · d716ae0 · c7effe6 · e8f80f7).
+const panel6 = () => p.locator('.ax-inspector')
+/** 아무것도 안 고른 상태로 — 오른쪽 패널이 쪽 칸을 보여 준다. */
+async function deselect() {
+  await p.evaluate(() => { const a = document.activeElement; if (a && a.blur) a.blur() })
+  await p.keyboard.press('Escape'); await p.waitForTimeout(150)
+  await p.keyboard.press('Escape'); await p.waitForTimeout(150)
+}
+async function waitSaved() {
+  for (let i = 0; i < 30; i++) {
+    const st = await p.locator('.save-lab').innerText().catch(() => '')
+    if (st === '저장됨') break
+    await p.waitForTimeout(300)
+  }
+  await p.waitForTimeout(1200)
+}
+async function openPicker() {
+  await p.locator('.cardpick .add').click(); await p.waitForTimeout(250)
+  return p.locator('.cpk-pop')
+}
+if (SHOT_DIR) { const fs = await import('node:fs'); fs.mkdirSync(SHOT_DIR + '/s6', { recursive: true }) }
+
+STAGES.push(['6단계 · 마인드맵 요소 · 머메이드 · 다시 열기', async () => {
+  await freshBook()
+  const n0 = await thumbs.count()
+  // ── 마인드맵: 가지 수를 고르고 요소로 펼친다 ──
+  let pop = await openPicker()
+  await pop.locator('.cpk-tile', { hasText: '마인드맵' }).first().click(); await p.waitForTimeout(200)
+  const brs = await pop.locator('.cpk-br').allInnerTexts()
+  ok('[마인드맵] 넣기 전에 가지 수 3~8 을 묻는다', brs.join(',') === '3,4,5,6,7,8', brs.join(','))
+  ok('[마인드맵] 기본은 3', (await pop.locator('.cpk-br.def').innerText()).trim() === '3')
+  await pop.locator('.cpk-br', { hasText: '5' }).click(); await p.waitForTimeout(500)
+  ok('[마인드맵] 새 쪽이 생긴다', (await thumbs.count()) === n0 + 1, `${n0} → ${await thumbs.count()}`)
+  const rounds = layer().locator('.fel.round')
+  ok('[마인드맵] 중심 1 + 가지 5 가 **각각의 요소**로 들어온다', (await rounds.count()) === 6, String(await rounds.count()))
+  const lines = await layer().locator('svg path[stroke="#c3cbdb"]').count()
+  ok('[마인드맵] 중심과 가지를 잇는 선이 다섯', lines === 5, String(lines))
+
+  // 중심을 끌면 움직인다
+  const center = rounds.nth(0)
+  /** 종이 안 좌표(패널이 바뀌면 화면 좌표는 밀린다). */
+  const at = (loc) => loc.evaluate((n) => [parseFloat(n.style.left), parseFloat(n.style.top)])
+  const c0 = await center.boundingBox()
+  await p.mouse.move(c0.x + c0.width / 2, c0.y + c0.height / 2); await p.mouse.down()
+  await p.mouse.move(c0.x + c0.width / 2 + 30, c0.y + c0.height / 2 + 20, { steps: 8 })
+  await p.mouse.move(c0.x + c0.width / 2 + 60, c0.y + c0.height / 2 + 40, { steps: 8 })
+  await p.mouse.up(); await p.waitForTimeout(300)
+  const c1 = await center.boundingBox()
+  const cAt = await at(center)
+  ok('[마인드맵] 중심을 끌면 움직인다', Math.abs(c1.x - c0.x) > 30 && Math.abs(c1.y - c0.y) > 20,
+    `(${Math.round(c0.x)},${Math.round(c0.y)}) → (${Math.round(c1.x)},${Math.round(c1.y)})`)
+
+  // 가지를 고르고 오른쪽 아래 손잡이로 늘린다
+  const br = rounds.nth(2)
+  const b0 = await br.boundingBox()
+  await br.click(); await p.waitForTimeout(250)
+  ok('[마인드맵] 가지를 고르면 크기 손잡이 여덟이 나온다', (await layer().locator('.rs-h').count()) === 8, String(await layer().locator('.rs-h').count()))
+  if (SHOT_DIR) await p.locator('.stage').first().screenshot({ path: SHOT_DIR + '/s6/stage6_mindmap_selected.png' })
+  const hse = await layer().locator('.rs-h.rs-se').boundingBox()
+  await p.mouse.move(hse.x + 5, hse.y + 5); await p.mouse.down()
+  await p.mouse.move(hse.x + 30, hse.y + 15, { steps: 6 }); await p.mouse.move(hse.x + 55, hse.y + 25, { steps: 6 })
+  await p.mouse.up(); await p.waitForTimeout(300)
+  const b1 = await br.boundingBox()
+  ok('[마인드맵] 가지 크기를 바꿀 수 있다', b1.width > b0.width + 30 && b1.height > b0.height + 10,
+    `${Math.round(b0.width)}×${Math.round(b0.height)} → ${Math.round(b1.width)}×${Math.round(b1.height)}`)
+
+  // 아무것도 안 고르면 쪽 칸에 「＋ 가지」
+  await deselect()
+  const addBr = panel6().locator('.insp-pill', { hasText: '＋ 가지' })
+  ok('[마인드맵] 아무것도 안 고르면 「＋ 가지」 가 쪽 칸에 있다', (await addBr.count()) === 1)
+  ok('[마인드맵] 지금 가지 수를 말한다', /지금 5개/.test(await panel6().innerText()))
+  await addBr.click(); await p.waitForTimeout(300)
+  ok('[마인드맵] 「＋ 가지」 가 하나 붙인다', (await rounds.count()) === 7, String(await rounds.count()))
+  ok('[마인드맵] 단추가 그 자리에 남아 이어 붙일 수 있다', (await addBr.count()) === 1 && /지금 6개/.test(await panel6().innerText()))
+  const cAt2 = await at(center)
+  ok('[마인드맵] 붙여도 옮겨 둔 중심은 그대로다', cAt2[0] === cAt[0] && cAt2[1] === cAt[1], `${cAt} → ${cAt2}`)
+
+  // ── 머메이드: 두 문 · 글로 뼈대 · 요소로 펼치기 ──
+  // 세로 종이는 위→아래가 2칸뿐이라 고르는 창이 **가로를 권한다.** 권하는 대로 가로로 바꾸고 넣는다.
+  pop = await openPicker()
+  await pop.locator('.cpk-tile', { hasText: '머메이드 LR' }).click(); await p.waitForTimeout(200)
+  ok('[머메이드] 세로 종이에서는 넣기 전에 말린다', (await p.locator('.cpk-mmwarn').count()) === 1)
+  await p.keyboard.press('Escape'); await p.waitForTimeout(150)
+  await deselect()
+  await panel6().locator('.insp-row.seg button', { hasText: '가로' }).click(); await p.waitForTimeout(300)
+  pop = await openPicker()
+  const tiles = await pop.locator('.cpk-tile .cpk-nm').allInnerTexts()
+  ok('[머메이드] 목록에 「머메이드 TB」·「머메이드 LR」 두 문이 있다', tiles.includes('머메이드 TB') && tiles.includes('머메이드 LR'), tiles.join(' · '))
+  if (SHOT_DIR) await pop.screenshot({ path: SHOT_DIR + '/s6/stage6_card_picker.png' })
+  await pop.locator('.cpk-tile', { hasText: '머메이드 TB' }).click(); await p.waitForTimeout(200)
+  ok('[머메이드] TB 문은 「graph TB」 표본으로 연다', /^graph TB/.test(await p.locator('.cpk-mm').inputValue()))
+  await p.locator('.cpk-back').click(); await p.waitForTimeout(150)
+  await pop.locator('.cpk-tile', { hasText: '머메이드 LR' }).click(); await p.waitForTimeout(200)
+  ok('[머메이드] LR 문은 「graph LR」 표본으로 연다', /^graph LR/.test(await p.locator('.cpk-mm').inputValue()))
+  const go = p.locator('.cpk-mmgo')
+  const goBg = await go.evaluate((n) => getComputedStyle(n).backgroundColor)
+  ok('[머메이드] 「펼치기」 단추가 보인다(색 이름이 뜬창까지 닿는다)', goBg === 'rgb(42, 120, 214)', goBg)
+  await p.locator('.cpk-mm').fill('graph LR\n  A[기획] --> B[설계]\n  이건 오타\n  A --> C[문서]\n  B --> D[개발]')
+  await p.waitForTimeout(150)
+  ok('[머메이드] 못 읽은 줄을 줄 번호와 함께 보여 준다', /3행/.test(await p.locator('.cpk-mmerr').innerText().catch(() => '')))
+  ok('[머메이드] 상자 수를 미리 말한다', /펼치기 \(4개\)/.test(await go.innerText()), await go.innerText())
+  await go.click(); await p.waitForTimeout(500)
+  const boxes = () => layer().locator('.fel.box')
+  ok('[머메이드] 글에 쓴 상자 넷이 요소로 펼쳐진다', (await boxes().count()) === 4, String(await boxes().count()))
+  const names = (await boxes().allInnerTexts()).map((t) => t.trim()).sort().join(',')
+  ok('[머메이드] 상자 글자가 글과 같다', names === ['개발', '기획', '문서', '설계'].sort().join(','), names)
+  ok('[머메이드] 선(화살표)이 셋', (await layer().locator('svg path[stroke="#b9c2d4"]').count()) === 3)
+
+  // ＋ 자식 · ＋ 형제
+  await boxes().filter({ hasText: '설계' }).first().click(); await p.waitForTimeout(250)
+  const kid = panel6().locator('.insp-pill', { hasText: '＋ 자식' })
+  ok('[머메이드] 상자를 고르면 「＋ 자식」 이 있다', (await kid.count()) === 1)
+  await kid.click(); await p.waitForTimeout(300)
+  ok('[머메이드] ＋ 자식 → 상자 다섯', (await boxes().count()) === 5, String(await boxes().count()))
+  await boxes().filter({ hasText: '설계' }).first().click(); await p.waitForTimeout(250)
+  await panel6().locator('.insp-pill', { hasText: '＋ 형제' }).click(); await p.waitForTimeout(300)
+  ok('[머메이드] ＋ 형제 → 상자 여섯', (await boxes().count()) === 6, String(await boxes().count()))
+  await boxes().filter({ hasText: '기획' }).first().click(); await p.waitForTimeout(250)
+  ok('[머메이드] 뿌리를 고르면 「＋ 형제」 가 「＋ 새 뿌리」 로 바뀐다',
+    (await panel6().locator('.insp-pill', { hasText: '＋ 새 뿌리' }).count()) === 1 && (await panel6().locator('.insp-pill', { hasText: '＋ 형제' }).count()) === 0)
+
+  // 접기 — 편집 화면에서만
+  const folds = layer().locator('.tree-fold')
+  ok('[머메이드] 자식이 있는 상자에 접기 손잡이가 있다', (await folds.count()) >= 2, String(await folds.count()))
+  const shownBefore = await boxes().count()
+  /** 뿌리(기획)의 접기 손잡이를 누른다 — 상자 왼쪽 아래 모서리 바로 밑. 접고 펼 때마다 트리가
+   *  다시 앉아 자리가 바뀌므로 **매번 다시 찾는다.** */
+  async function toggleRoot() {
+    const rb = await boxes().filter({ hasText: '기획' }).first().boundingBox()
+    const fb = await folds.evaluateAll((ns) => ns.map((n) => { const r = n.getBoundingClientRect(); return { x: r.x, y: r.y } }))
+    const d = (q) => Math.hypot(q.x - rb.x, q.y - (rb.y + rb.height))
+    const near = fb.reduce((a2, q) => (d(q) < d(a2) ? q : a2), fb[0])
+    await p.mouse.click(near.x + 6, near.y + 6); await p.waitForTimeout(300)
+  }
+  await toggleRoot()
+  const shownFolded = await boxes().count()
+  ok('[머메이드] 뿌리를 접으면 아래 상자가 편집 화면에서 숨는다', shownFolded === 1, `${shownBefore} → ${shownFolded}`)
+  ok('[머메이드] 접힌 상자 옆에 숨은 수(+N)가 보인다', /\+5/.test(await layer().locator('.tree-plusn').innerText().catch(() => '')))
+  if (SHOT_DIR) {
+    await toggleRoot()                                                         // 펴서 찍는다
+    await boxes().filter({ hasText: '설계' }).first().click(); await p.waitForTimeout(250)
+    await p.locator('.stage').first().screenshot({ path: SHOT_DIR + '/s6/stage6_mermaid_tree.png' })
+    await deselect()
+    await toggleRoot()                                                         // 다시 접는다
+  }
+  // 장 목록의 작은 그림은 편집 화면이 아니다(interactive=false) — 거기엔 다 펴져 그려진다.
+  const thumbBoxes = await p.locator('.axth-list .axth.on .fel.box').count()
+  ok('[머메이드] 접어도 편집 밖(장 목록 그림)에는 다 그려진다 — 접기는 편집 화면에서만', thumbBoxes === 6, String(thumbBoxes))
+  await toggleRoot()
+  ok('[머메이드] 다시 펴면 모두 돌아온다', (await boxes().count()) === 6, String(await boxes().count()))
+  await deselect()
+  ok('[머메이드] 아무것도 안 고르면 쪽 칸에 「＋ 새 뿌리」 · 뿌리 수', /지금 뿌리 1개/.test(await panel6().innerText()))
+
+  // ── 다시 열어도 남는다 ──
+  await waitSaved()
+  await p.goto(URL, { waitUntil: 'networkidle' })
+  await p.locator('.lib-open-hit').first().click()
+  await p.waitForSelector('.ax-app .axth', { timeout: 15000 }); await p.waitForTimeout(600)
+  ok('[다시 열기] 쪽 수 그대로', (await thumbs.count()) === n0 + 2, String(await thumbs.count()))
+  await thumbs.nth(n0).click(); await p.waitForTimeout(300)
+  ok('[다시 열기] 마인드맵 요소 일곱이 그대로다', (await layer().locator('.fel.round').count()) === 7, String(await layer().locator('.fel.round').count()))
+  await deselect()
+  ok('[다시 열기] 마인드맵 표시(mindmapCenter)가 남아 「＋ 가지」·「지금 6개」', /지금 6개/.test(await panel6().innerText()))
+  await thumbs.nth(n0 + 1).click(); await p.waitForTimeout(300)
+  ok('[다시 열기] 트리 상자 여섯이 그대로다', (await layer().locator('.fel.box').count()) === 6, String(await layer().locator('.fel.box').count()))
+  await deselect()
+  ok('[다시 열기] 트리 표시(treeRoot)가 남아 「지금 뿌리 1개」', /지금 뿌리 1개/.test(await panel6().innerText()))
+}])
+
+// 이미 **카드로 만들어 둔** 마인드맵은 열 때 저절로 바꾸지 않는다 — 「⤢ 요소로 펼치기」 를 누를 때만(68a5627).
+STAGES.push(['6단계 · 옛 마인드맵 카드 펼치기', async () => {
+  await freshBook()
+  const state = { title: '옛 마인드맵', orientation: 'portrait', theme: 'light', font: 'auto', size: 'm', selectedPageId: 1,
+    pages: [{ id: 1, cardKey: 'mindmap', fields: { title: '', center: '옛 중심', b1: '품질', b2: '생산', b3: '물류', b4: '경영' }, free: false, els: [], conns: [], strokes: [] }] }
+  const made = await p.evaluate(async (st) => {
+    const r = await fetch('/api/projects', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: '옛 마인드맵', state: st }) })
+    return r.ok
+  }, state)
+  ok('[옛 마인드맵] 카드로 된 자료를 만들었다(서버)', made)
+  await p.goto(URL, { waitUntil: 'networkidle' })
+  await p.locator('.lib-open-hit', { hasText: '옛 마인드맵' }).first().click()
+  await p.waitForSelector('.ax-app .axth', { timeout: 15000 }); await p.waitForTimeout(500)
+  ok('[옛 마인드맵] 열어도 저절로 바뀌지 않는다(요소 0)', (await layer().locator('.fel').count()) === 0)
+  await deselect()
+  const ex = panel6().locator('.insp-pill', { hasText: '요소로 펼치기' })
+  ok('[옛 마인드맵] 쪽 칸에 「⤢ 요소로 펼치기」 가 있다', (await ex.count()) === 1)
+  await ex.click(); await p.waitForTimeout(400)
+  const texts = (await layer().locator('.fel.round').allInnerTexts()).map((t) => t.trim())
+  ok('[옛 마인드맵] 펼치면 중심 1 + 가지 4 가 요소가 된다(필드 글 그대로)', texts.length === 5 && texts.includes('옛 중심') && texts.includes('경영'), texts.join(','))
+  await deselect()
+  ok('[옛 마인드맵] 펼친 뒤에는 「＋ 가지」 가 뜬다', (await panel6().locator('.insp-pill', { hasText: '＋ 가지' }).count()) === 1)
+  await p.evaluate(() => { const a = document.activeElement; if (a && a.blur) a.blur() })
+  await p.keyboard.press('ControlOrMeta+z'); await p.waitForTimeout(400)
+  ok('[옛 마인드맵] ⌘Z 로 되돌린다 — 요소가 걷힌다', (await layer().locator('.fel').count()) === 0, String(await layer().locator('.fel').count()))
+  // 요소만 걷히고 **카드가 빈 쪽**이 되면 안 된다 — 필드 글(옛 중심)과 「요소로 펼치기」 가 돌아와야 한다.
+  const back = await p.locator('.stage').first().innerText()
+  await deselect()
+  ok('[옛 마인드맵] ⌘Z 뒤에도 카드 글이 그대로다(빈 쪽이 되지 않는다)', /옛 중심/.test(back) && (await ex.count()) === 1, back.slice(0, 60).replace(/\n/g, ' '))
+}])
+
 // ONLY=5단계 처럼 주면 그 이름이 든 단계만 돈다(고치는 동안 빨리 돌리려고). 비우면 전부.
 const ONLY = process.env.ONLY || ''
 for (const [name, run] of STAGES) {

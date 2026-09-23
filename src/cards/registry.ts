@@ -34,6 +34,17 @@ export const CARD_REGISTRY: CardDef[] = [
     fields: [f('title', '제목', '시장과 경쟁'), f('p1', '시장 한 줄', '국내 품질SW 3천억'), f('p2', '우위', '현장 특화 데이터')] },
   { key: 'flow', group: 'viz', hidden: true, label: '프로세스(플로우)', title: '도입 프로세스', viz: 'flow',
     fields: [f('title', '제목', '도입 프로세스'), f('s1', '단계 1', '데이터 연결'), f('s2', '단계 2', 'AI 학습'), f('s3', '단계 3', '현장 적용'), f('s4', '단계 4 (선택)', '성과 검증')] },
+  // 머메이드는 **카드가 아니라 펼침**이다(store.addCard 가 가로챈다). 목록에 보이려고 여기 둔다 —
+  // 마인드맵과 같은 자리다. `fields` 는 안 쓴다: 내용은 머메이드 원문에서 온다.
+  //
+  // **카드는 하나인데 고르는 문은 둘이다**(EVER-SKETCH1 e8f80f7 · 「머메이드 TB」·「머메이드 LR」).
+  // 방향은 카드가 아니라 **글 첫 줄**이 정한다 — `parseMermaid` 가 `graph TB|TD|LR` 를 읽는다.
+  // 그러니 둘로 가른다 해도 달라지는 것은 **채워 주는 표본 글 한 줄**뿐이고, 그 한 줄을 위해
+  // 카드 종류를 둘로 쪼개면 등록·서버 사본·저장된 `cardKey` 가 전부 두 벌이 된다.
+  // 그래서 **쪼개지 않았다.** 두 문은 CardPicker 에만 있다(MM_DOORS).
+  //
+  // 키는 `tree` 로 둔다(원본과 같다 — 원본에서 저장된 자료와 store.addCard 가 이 이름을 쓴다).
+  { key: 'tree', group: 'viz', label: '머메이드', title: '흐름도', viz: 'flow', fields: [] },
   { key: 'mindmap', group: 'viz', label: '마인드맵', title: 'AX 추진 영역', viz: 'mindmap',
     fields: [f('title', '제목', 'AX 추진 영역'), f('center', '중심 주제', '유니에버 AX'), f('b1', '가지 1', '품질'), f('b2', '가지 2', '생산'), f('b3', '가지 3', '물류'), f('b4', '가지 4 (선택)', '경영정보'), f('b5', '가지 5 (선택)'), f('b6', '가지 6 (선택)'), f('b7', '가지 7 (선택)'), f('b8', '가지 8 (선택)')] },
   { key: 'sticky', group: 'viz', label: '스티키 메모', title: '아이디어 메모', viz: 'sticky',

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { openSections, rememberOpenSections } from '../../persistence/prefs'
 import NumInput from './NumInput'
 import { BRANCH_MAX, BRANCH_BOX, nextBranchSpot } from '../../cards/mindmapEls'
+import { treeShape, descendantCount, knownOf, isTreePage } from '../../cards/treeOps'
 import { useKey } from '../../ui/keyLabel'
 import { useBuilder } from '../../state/store'
 import type { PaperType } from '../../state/store'
@@ -98,6 +99,8 @@ export default function RightPanel() {
   const duplicatePage = useBuilder((s) => s.duplicatePage)
   const expandMindmap = useBuilder((s) => s.expandMindmap)
   const setCanvas = useBuilder((s) => s.setCanvas)
+  const treeAdd = useBuilder((s) => s.treeAdd)
+  const treeFold = useBuilder((s) => s.treeFold)
   const K = useKey()
   const removePage = useBuilder((s) => s.removePage)
   const groupEls = useBuilder((s) => s.groupEls)
@@ -169,6 +172,16 @@ export default function RightPanel() {
     // 「＋ 가지」가 화면에서 사라진다 — 둘째 가지를 붙이려면 빈 데를 한 번 눌러야 한다.
     // 가지는 대개 두셋을 이어 붙이므로, **단추가 그 자리에 남아 있는 편**이 낫다.
   }
+
+  /** 트리(EVER-SKETCH1 c7effe6). **뿌리는 선에서 센다** — 저장된 값이 아니라.
+   *  그래서 사람이 선을 하나 그어 뿌리를 자식으로 만들어도 단추가 바로 따라온다. */
+  const tree = page && isTreePage(page)
+    ? treeShape(page.els, page.conns, knownOf(page)) : null
+  const elInTree = !!(tree && selElId != null && tree.members.includes(selElId))
+  const elIsRoot = !!(tree && selElId != null && tree.roots.includes(selElId))
+  const elKids = tree && selElId != null ? (tree.kids.get(selElId) || []).length : 0
+  const elFolded = !!(el && el.folded)
+  const hiddenN = tree && selElId != null ? descendantCount(tree, selElId) : 0
 
   const dark = !!(page && page.bg)
   const curPaper: PaperType = (page && page.paper) || 'blank'
@@ -322,6 +335,34 @@ export default function RightPanel() {
             {whoSub ? <span className="insp-who-s">{whoSub}</span> : null}
           </div>
           <div className="insp-body">
+            {/* **트리 칸은 맨 위**(EVER-SKETCH1 c7effe6). 「＋ 자식」은 **어느 상자에** 붙이느냐가 곧 구조라
+                고른 것이 있어야 뜬다 — 마인드맵의 「＋ 가지」가 쪽 칸에 있는 것과 다른 이유다.
+                **뿌리를 골랐을 때는 「＋ 형제」가 「＋ 새 뿌리」로 바뀐다.** 뿌리는 부모가 없어서
+                「형제」라는 말이 틀리는데, 하는 일은 같다 — 부모 없는 줄기를 하나 더 만든다. */}
+            {elInTree && el.echoOf == null ? (<>
+              <div className="insp-sec">트리</div>
+              <div className="insp-row">
+                <button className="insp-pill" title="고른 상자 오른쪽 한 칸에 붙입니다"
+                  onClick={() => { if (!page) return; snapPage(); treeAdd(page.id, selElId, 'child') }}>＋ 자식</button>
+                <button className="insp-pill"
+                  title={elIsRoot ? '뿌리는 부모가 없어서, 부모 없는 줄기를 하나 더 만듭니다'
+                                  : '고른 상자 바로 아래, 같은 부모 밑에 붙입니다'}
+                  onClick={() => { if (!page) return; snapPage(); treeAdd(page.id, selElId, elIsRoot ? 'root' : 'sibling') }}>
+                  {elIsRoot ? '＋ 새 뿌리' : '＋ 형제'}</button>
+                {elKids > 0 ? (
+                  <button className="insp-pill" title={elFolded ? '아래를 다시 폅니다' : `아래 ${hiddenN}개를 숨깁니다`}
+                    onClick={() => { if (!page || selElId == null) return; snapPage(); treeFold(page.id, selElId) }}>
+                    {elFolded ? '▸ 펴기' : '▾ 접기'}</button>
+                ) : null}
+              </div>
+              <span style={cap}>붙이면 트리가 <b>다시 앉습니다</b> — 자리가 곧 구조라서요. {K('mod+Z')} 로 한 번에 돌아갑니다.
+                {elKids > 0 ? <> 접은 것은 <b>편집 화면에서만</b> 숨고, 미리보기·발표·내보내기에는 다 펴져 나갑니다.</> : null}</span>
+            </>) : null}
+            {el.echoOf != null ? (<>
+              <div className="insp-sec">트리</div>
+              <div className="insp-hint">이 상자는 <b>아래 띠 머리에 다시 놓은 부모</b>입니다.
+                고치려면 위 띠의 원본을 고치세요 — 여기 것은 앉힐 때마다 새로 그려집니다.</div>
+            </>) : null}
             {/* **묶음을 일 단위로 다시 나눴다**(93ecb00, 시안 그대로 · 사용자 결정 ㄴ).
                 표 = 칸 · 행 · 채우기 · 표 전체 글자 · 크기·자리 · 테두리·머리글,
                 그 밖 = 모양·색 · 글자 · 크기·자리 · 효과·순서.
@@ -606,6 +647,19 @@ export default function RightPanel() {
             </div>
             <span style={cap}>가지를 하나씩 옮기고 크기를 바꿀 수 있게 됩니다.
               대신 오른쪽 칸으로 한 번에 고치는 건 그때부터 안 돼요 — 잘못 눌렀으면 {K('mod+Z')} 로 되돌립니다.</span>
+          </>) : null}
+
+          {/* **＋ 새 뿌리**(EVER-SKETCH1 c7effe6). 아무것도 안 골랐을 때 여기 있다 —
+              마인드맵의 「＋ 가지」와 같은 자리라 손이 기억한다.
+              글로 줄기를 둘 쓰는 길도 그대로 열려 있고, 그렇게 들어온 뿌리도 여기 수에 잡힌다. */}
+          {tree ? (<>
+            <div className="insp-sec">트리</div>
+            <div className="insp-row">
+              <button className="insp-pill" title="빈 자리에 부모 없는 줄기를 하나 만듭니다"
+                onClick={() => { if (!page) return; snapPage(); treeAdd(page.id, null, 'root') }}>＋ 새 뿌리</button>
+              <span className="insp-hint" style={{ margin: 0 }}>지금 뿌리 {tree.roots.length}개</span>
+            </div>
+            <span style={cap}>상자를 고르면 <b>＋ 자식 · ＋ 형제 · 접기</b>가 나옵니다.</span>
           </>) : null}
 
           {/* **＋ 가지**(EVER-SKETCH1 8c7c812). 펼쳐진 마인드맵에만 나온다 —

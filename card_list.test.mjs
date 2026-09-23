@@ -15,10 +15,10 @@
 // 둘 중 하나를 놓친다.
 //
 // ebook_html 이식(4단계 · EVER-SKETCH1 e8f80f7 중 **카드 감추기만**):
-//   · ④ 머메이드 TB·LR 두 문은 **6단계** 몫이라 통째로 주석으로 남겼다(아래).
+//   · ④ 머메이드 TB·LR 두 문은 6단계에서 옮기고 검사를 원본 그대로 되살렸다(아래).
 //   · ⑤ 「AI로 정리」 의 KPI 전환 제안 제거(AiCleanup · cleanup.ts)는 이번 이식 범위 밖이다 —
 //     서버가 감춘 카드를 AI 에게 안 권하는 검사 하나만 남겼다.
-//   · 이 저장소에는 `tree`(머메이드) 카드가 아직 없다 — 「그대로 보인다」 목록에서 뺐다.
+//   · `tree`(머메이드) 카드는 6단계에서 들어와 「그대로 보인다」 목록에 되살렸다.
 //   · CardPicker 는 원본과 모양이 달라(타일 목록 없이 등록을 바로 거른다) 거르는 줄의 모양만 맞췄다.
 //   · 감춘 카드로 **이미 만든 쪽이 그대로 그려지는지**(PageView)를 ②-2 로 더 본다.
 //
@@ -44,8 +44,8 @@ const pv = bare(read('./src/cards/PageView.tsx'))
 const cat = read('./server/intent/card_catalog.py')
 
 const HIDDEN = ['summary', 'kpi', 'roadmap', 'market', 'flow', 'dsection']
-// (ebook_html) 원본 목록의 'tree' 는 뺐다 — 이 저장소에 아직 없는 카드다(6단계).
-const SHOWN = ['cover', 'toc', 'note', 'closing', 'mindmap', 'sticky', 'board']
+// (ebook_html) 4단계에서 빼 두었던 'tree'(머메이드)를 6단계에서 되살렸다 — 원본 목록 그대로다.
+const SHOWN = ['cover', 'toc', 'note', 'closing', 'tree', 'mindmap', 'sticky', 'board']
 
 // ── ① 감춘 여섯, 남은 여덟 ────────────────────────
 {
@@ -56,8 +56,8 @@ const SHOWN = ['cover', 'toc', 'note', 'closing', 'mindmap', 'sticky', 'board']
   // 「경영 보고 보강」 묶음은 통째로 비었다. 빈 묶음이 이름만 남으면 안 된다.
   check(CARD_REGISTRY.filter((c) => c.group === 'extra' && !c.hidden).length === 0,
     '경영 보고 보강 묶음은 통째로 비었다')
-  // (ebook_html) 원본의 이름은 `tiles`, 이 저장소는 `items` 다.
-  check(/if \(!items\.length\) return null/.test(pick),
+  // (ebook_html) 4단계에선 `items` 로 맞췄다 — 6단계에서 머메이드 타일(MM_DOORS)이 들어와 원본의 `tiles` 로 되돌렸다.
+  check(/if \(!tiles\.length\) return null/.test(pick),
     '**빈 묶음은 이름도 안 그린다** — 안 그러면 「경영 보고 보강」만 덩그러니 남는다')
 }
 
@@ -105,8 +105,8 @@ const SHOWN = ['cover', 'toc', 'note', 'closing', 'mindmap', 'sticky', 'board']
   // 검색으로도 못 꺼내야 한다 — 거르기를 목록에만 걸고 검색에 안 걸면 쳐서 찾을 수 있다.
   const gi = pick.indexOf('const items = CARD_REGISTRY.filter')
   const gseg = pick.slice(gi, pick.indexOf('return (', gi))
-  // (ebook_html) 원본은 타일(`t.id`)을 거른다 — 이 저장소는 카드를 바로 거르므로 `t.key` 다.
-  check(gi > 0 && /\.filter\(\(t\) => match\(t\.label, t\.key\)\)/.test(gseg),
+  // (ebook_html) 6단계에서 타일(`t.id`)을 거르는 원본 모양으로 되돌렸다.
+  check(gi > 0 && /\.filter\(\(t\) => match\(t\.label, t\.id\)\)/.test(gseg),
     '검색은 **거르고 난 뒤**에 건다 — 순서가 반대면 감춘 카드가 검색으로 나온다')
   // 전체를 훑어 마지막 구멍을 막는다. 위 넷을 다 통과해도 새 호출이 생기면 여기서 걸린다.
   for (const k of HIDDEN) {
@@ -115,29 +115,29 @@ const SHOWN = ['cover', 'toc', 'note', 'closing', 'mindmap', 'sticky', 'board']
   }
 }
 
-// ── ④ 머메이드 — 카드는 하나, 문은 둘 ── (6단계)
-// (ebook_html) 머메이드 TB·LR 두 문은 6단계에서 옮긴다. 그때 아래 검사를 되살린다.
-// {
-//   check(cardByKey('tree')?.label === '머메이드', '이름에서 「트리 ·」가 빠졌다')
-//   check(!CARD_REGISTRY.some((c) => c.key === 'treeTB' || c.key === 'treeLR'),
-//     '**카드를 쪼개지 않았다** — 쪼개면 등록·서버 사본·저장된 cardKey 가 두 벌이 된다')
-//   check(/graph TB/.test(pick) && /graph LR/.test(pick), '두 방향 표본이 다 있다')
-//   check(!/graph TD/.test(pick),
-//     '**TD 가 아니라 TB 로 쓴다** — 파서가 TB 를 그대로 읽고, 되돌려 쓰는 곳이 없어 바뀌지 않는다')
-//   // 두 문이 **같은 카드로** 간다. 다른 데로 가면 저장된 cardKey 가 갈라진다.
-//   const di = pick.indexOf('const MM_DOORS')
-//   const dseg = pick.slice(di, pick.indexOf(']', pick.indexOf('dir: \'LR\'', di)))
-//   check(di > 0 && !/id: 'tree(TB|LR)'/.test(dseg) && /dir: 'TB'/.test(dseg) && /dir: 'LR'/.test(dseg),
-//     '문 둘이 방향만 다르다')
-//   check(/addCard\('tree', undefined, mm\)/.test(pick), '어느 문으로 들어와도 **같은 카드키**로 간다')
-//   // 몸통은 한 벌이어야 한다 — 두 벌이면 한쪽만 고쳐져서 문마다 다른 표본이 나온다.
-//   check(/const BODY = `/.test(pick) && (pick.match(/A\[기획\] --> B\[설계\]/g) || []).length === 1,
-//     '표본 몸통은 한 벌이고 첫 줄만 갈아 끼운다')
-//   check(/function pickMermaid/.test(pick) && /setMm\(d\.src\)/.test(pick),
-//     '**문을 고를 때마다 표본을 새로 채운다** — 안 그러면 TB 를 눌렀는데 아까 LR 글이 남는다')
-//   check(/\{door\.label\}/.test(pick), '대화상자가 어느 문으로 들어왔는지 말한다')
-//   check(/mmTB:/.test(pick) && /mmLR:/.test(pick), '방향이 보이는 그림이 둘 다 있다')
-// }
+// ── ④ 머메이드 — 카드는 하나, 문은 둘 ───────────────
+// (ebook_html) 4단계에서 주석으로 남겨 둔 검사를 6단계에서 원본 그대로 되살렸다.
+{
+  check(cardByKey('tree')?.label === '머메이드', '이름에서 「트리 ·」가 빠졌다')
+  check(!CARD_REGISTRY.some((c) => c.key === 'treeTB' || c.key === 'treeLR'),
+    '**카드를 쪼개지 않았다** — 쪼개면 등록·서버 사본·저장된 cardKey 가 두 벌이 된다')
+  check(/graph TB/.test(pick) && /graph LR/.test(pick), '두 방향 표본이 다 있다')
+  check(!/graph TD/.test(pick),
+    '**TD 가 아니라 TB 로 쓴다** — 파서가 TB 를 그대로 읽고, 되돌려 쓰는 곳이 없어 바뀌지 않는다')
+  // 두 문이 **같은 카드로** 간다. 다른 데로 가면 저장된 cardKey 가 갈라진다.
+  const di = pick.indexOf('const MM_DOORS')
+  const dseg = pick.slice(di, pick.indexOf(']', pick.indexOf('dir: \'LR\'', di)))
+  check(di > 0 && !/id: 'tree(TB|LR)'/.test(dseg) && /dir: 'TB'/.test(dseg) && /dir: 'LR'/.test(dseg),
+    '문 둘이 방향만 다르다')
+  check(/addCard\('tree', undefined, mm\)/.test(pick), '어느 문으로 들어와도 **같은 카드키**로 간다')
+  // 몸통은 한 벌이어야 한다 — 두 벌이면 한쪽만 고쳐져서 문마다 다른 표본이 나온다.
+  check(/const BODY = `/.test(pick) && (pick.match(/A\[기획\] --> B\[설계\]/g) || []).length === 1,
+    '표본 몸통은 한 벌이고 첫 줄만 갈아 끼운다')
+  check(/function pickMermaid/.test(pick) && /setMm\(d\.src\)/.test(pick),
+    '**문을 고를 때마다 표본을 새로 채운다** — 안 그러면 TB 를 눌렀는데 아까 LR 글이 남는다')
+  check(/\{door\.label\}/.test(pick), '대화상자가 어느 문으로 들어왔는지 말한다')
+  check(/mmTB:/.test(pick) && /mmLR:/.test(pick), '방향이 보이는 그림이 둘 다 있다')
+}
 
 // ── ⑤ AI 가 감춘 카드를 안 권한다 ─────────────────
 // 사람이 못 고르는 카드를 기계가 권하면 목록에 없는 것이 만들어진다.
