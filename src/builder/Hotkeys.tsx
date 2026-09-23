@@ -91,15 +91,28 @@ export default function Hotkeys(props: Props) {
        *
        * 쪽이 하나도 없을 때(마지막 쪽을 지운 직후)는 문서 이력만 본다.
        */
+      /**
+       * **되돌린 뒤에도 고른 것을 놓지 않는다**(EVER-SKETCH1 e6bc1d2). 예전에는 늘 `setSel(null)` 이라,
+       * 연달아 되돌리면 어디를 보고 있었는지 매번 잃었다. 다만 되돌린 모습에 **그 요소가 없으면**
+       * 붙잡고 있을 수 없으니 그때만 놓는다. 칸 범위(`tableSel`)는 늘 푼다 — 표의 행·열이
+       * 달라졌을 수 있어 옛 범위는 못 믿는다(`setSel` 이 범위를 같이 비운다).
+       */
+      const restore = (pageId: number, snapJson: string) => {
+        const keep = ui.selEl
+        bs.setCanvas(pageId, JSON.parse(snapJson))
+        const now = useBuilder.getState().pages.find((p) => p.id === pageId)
+        const alive = keep != null && !!now && now.els.some((el) => el.id === keep)
+        ui.setSel(alive ? keep : null)
+      }
       const undoOnce = () => {
         if (!page) { bs.undoDoc(); ui.setSel(null); return }
         if (nextUndoKind(page.id) === 'doc') { bs.undoDoc(); ui.setSel(null); return }
-        const s = popSnap(page.id); if (s) { pushRedo(page.id, snapStr(page)); bs.setCanvas(page.id, JSON.parse(s)); ui.setSel(null) }
+        const s = popSnap(page.id); if (s) { pushRedo(page.id, snapStr(page)); restore(page.id, s) }
       }
       const redoOnce = () => {
         if (!page) { bs.redoDoc(); ui.setSel(null); return }
         if (nextRedoKind(page.id) === 'doc') { bs.redoDoc(); ui.setSel(null); return }
-        const s = popRedo(page.id); if (s) { pushUndoRaw(page.id, snapStr(page)); bs.setCanvas(page.id, JSON.parse(s)); ui.setSel(null) }
+        const s = popRedo(page.id); if (s) { pushUndoRaw(page.id, snapStr(page)); restore(page.id, s) }
       }
       if (mod && lower === 'z') {
         e.preventDefault()

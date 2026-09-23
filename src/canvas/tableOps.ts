@@ -29,6 +29,70 @@ export function mergeCovering(merges: Merge[] | undefined, r: number, c: number)
   return merges.find((m) => r >= m.r && r < m.r + m.rs && c >= m.c && c < m.c + m.cs)
 }
 
+/**
+ * 고른 칸 범위를 **병합 칸의 실제 크기에 맞춰 넓힌다**(EVER-SKETCH1 e38d357).
+ *
+ * 범위는 눌러 시작한 칸과 커서가 있는 칸의 **저장된 (행, 열)** 로만 만들어졌는데,
+ * **병합 칸은 제 왼쪽 위 좌표 하나만** 갖는다. 그래서 2행 높이로 병합된 칸(0행 시작)에
+ * 커서가 닿는 순간 범위의 아래 변이 1행에서 **0행으로 줄어들어** 그 아래 줄이 통째로 빠졌다.
+ * 엑셀은 반대로 병합 칸에 닿으면 선택이 그 칸 전체를 삼키도록 **커진다.** 그렇게 맞춘다.
+ *
+ * 사각형에 닿은 병합이 있으면 통째로 품도록 키우고, 키운 사각형이 또 다른 병합에 닿을 수
+ * 있으니 **더 커지지 않을 때까지** 되풀이한다. 병합이 없으면 준 값 그대로(바로 세워서)다.
+ */
+export function growToMerges(merges: Merge[] | undefined,
+                             r0: number, c0: number, r1: number, c1: number,
+                             ): { r0: number; c0: number; r1: number; c1: number } {
+  let a = Math.min(r0, r1), b = Math.max(r0, r1)
+  let x = Math.min(c0, c1), y = Math.max(c0, c1)
+  if (!merges || !merges.length) return { r0: a, c0: x, r1: b, c1: y }
+  // 병합 개수만큼 돌면 반드시 멈춘다 — 한 바퀴에 적어도 하나는 새로 삼켜야 계속 커진다.
+  for (let pass = 0; pass <= merges.length; pass++) {
+    let grew = false
+    for (const m of merges) {
+      const mr1 = m.r + m.rs - 1, mc1 = m.c + m.cs - 1
+      if (m.r > b || mr1 < a || m.c > y || mc1 < x) continue   // 안 닿았다
+      if (m.r < a) { a = m.r; grew = true }
+      if (mr1 > b) { b = mr1; grew = true }
+      if (m.c < x) { x = m.c; grew = true }
+      if (mc1 > y) { y = mc1; grew = true }
+    }
+    if (!grew) break
+  }
+  return { r0: a, c0: x, r1: b, c1: y }
+}
+
+/**
+ * 머리 띠를 눌렀을 때 고를 범위 — **그 줄·그 열에 「제 칸」으로 들어 있는 것들**(EVER-SKETCH1 e38d357).
+ *
+ * 줄 양옆이 전부 2행 높이 병합이면 끌어서는 그 줄만 고를 수 없다(병합에 닿아 2행이 된다).
+ * 그래서 머리 띠는 **그 줄에서 시작하는 칸만** 센다 — 끌기(growToMerges)와 답이 다른 게 의도다.
+ * 고를 게 없으면 null — 병합에 통째로 덮인 줄(제 칸이 하나도 없는 줄)이 그렇다.
+ */
+export function bandRange(el: Pick<FreeEl, 'rows' | 'cols' | 'merges'>,
+                          axis: 'row' | 'col', i: number,
+                          ): { r0: number; c0: number; r1: number; c1: number } | null {
+  const R = el.rows || 1, C = el.cols || 1
+  if (i < 0 || (axis === 'row' ? i >= R : i >= C)) return null
+  const cov = coveredSet(el.merges)
+  let r0 = Infinity, c0 = Infinity, r1 = -Infinity, c1 = -Infinity
+  const n = axis === 'row' ? C : R
+  for (let k = 0; k < n; k++) {
+    const r = axis === 'row' ? i : k
+    const c = axis === 'row' ? k : i
+    if (cov.has(r + '_' + c)) continue          // 위/왼쪽 병합에 덮인 자리 — 제 칸이 아니다
+    const m = mergeCovering(el.merges, r, c)
+    const er = m ? m.r + m.rs - 1 : r
+    const ec = m ? m.c + m.cs - 1 : c
+    if (r < r0) r0 = r
+    if (c < c0) c0 = c
+    if (er > r1) r1 = er
+    if (ec > c1) c1 = ec
+  }
+  if (r0 === Infinity) return null
+  return { r0, c0, r1, c1 }
+}
+
 // 덮이지만 앵커가 아닌 셀들(렌더에서 숨김)
 export function coveredSet(merges: Merge[] | undefined): Set<string> {
   const s = new Set<string>()
@@ -45,6 +109,32 @@ export function coveredSet(merges: Merge[] | undefined): Set<string> {
 export function sizeTracks(arr: number[] | undefined, n: number): string {
   const ok = !!arr && arr.length === n && arr.every((v) => typeof v === 'number' && v > 0 && isFinite(v))
   return ok ? (arr as number[]).map((v) => v + 'fr').join(' ') : `repeat(${n}, 1fr)`
+}
+
+/** 경계선 i(칸 i 와 i+1 사이)를 끌었을 때의 새 비율 배열(EVER-SKETCH1 6817694).
+ *
+ *  **합을 그대로 둔다.** 한쪽이 넓어지면 옆이 그만큼 좁아진다 — 표 전체 크기는
+ *  안 변한다. 표를 키우는 것은 모서리 손잡이가 할 일이고, 이건 「안에서 나누는」 일이다.
+ *  둘을 한 동작에 섞으면 열 하나 넓히려다 표가 종이 밖으로 나간다.
+ *
+ *  `px` 는 이 방향의 표 크기(캔버스 px), `dPx` 는 끌린 거리다.
+ *  최소 12px 은 남긴다 — 0 으로 만들면 그 열은 다시 잡을 수 없다.
+ */
+export function dragTrack(arr: number[], i: number, dPx: number, px: number,
+                          minPx = 12): number[] {
+  if (i < 0 || i + 1 >= arr.length || !(px > 0)) return arr
+  const total = arr.reduce((a, b) => a + b, 0)
+  if (!(total > 0)) return arr
+  const min = (total * minPx) / px
+  const a0 = arr[i], b0 = arr[i + 1]
+  // 두 칸 다 이미 최소보다 작으면(아주 좁은 표) 건드리지 않는다 — 억지로 맞추면 튄다.
+  if (a0 - min < 0 && b0 - min < 0) return arr
+  let d = (dPx * total) / px
+  d = Math.max(-(a0 - min), Math.min(b0 - min, d))
+  const out = arr.slice()
+  out[i] = a0 + d
+  out[i + 1] = b0 - d
+  return out
 }
 
 // 새 행/열의 크기는 **바로 그 자리에 있던 것과 같게** 잡는다(끝에 붙이면 마지막 것과 같게).
@@ -87,6 +177,35 @@ function remapCellStyles(el: FreeEl, fn: (r: number, c: number) => [number, numb
   }
 }
 
+/**
+ * 행이 하나 늘거나 줄 때 **표 전체 높이**를 얼마로 옮길지(EVER-SKETCH1 bc8baa1).
+ *
+ * 예전에는 행을 추가해도 `h` 를 안 건드렸다. 표는 고정 높이 격자이고 `gridTemplateRows` 가
+ * `fr` 이라, 행이 늘면 **남아 있던 행들이 대신 납작해졌다** — 「행을 넣었더니 표가 뭉개졌다」.
+ *
+ * 규칙: **행 높이는 사람이 정하고, 표 높이는 행 수를 따라간다.** 넣으면 그 자리 행만큼 커지고,
+ * 빼면 그만큼 작아진다(대칭 — 한쪽만 움직이면 넣었다 뺐다 하는 동안 표가 계속 부푼다).
+ * 새 행 크기는 insertSize() 와 **같은 규칙**(그 자리 행과 같게)으로 잡는다.
+ */
+export function rowChangedHeight(el: FreeEl, at: number, delta: 1 | -1): number | undefined {
+  const h = el.h
+  if (typeof h !== 'number' || !isFinite(h) || h <= 0) return undefined
+  const R = el.rows || (el.cells ? el.cells.length : 0) || 1
+  const arr = el.rowh
+  const ok = !!arr && arr.length === R && arr.every((v) => typeof v === 'number' && v > 0 && isFinite(v))
+  const w = ok ? (arr as number[]) : Array.from({ length: R }, () => 1)
+  const sum = w.reduce((a, b) => a + b, 0)
+  if (sum <= 0) return undefined
+  const one = w[Math.min(Math.max(at, 0), R - 1)] || 1
+  const next = delta > 0 ? sum + one : sum - one
+  if (next <= 0) return undefined
+  return Math.max(1, Math.round((h * next) / sum))
+}
+
+// 높이를 모르면 **키 자체를 싣지 않는다.** `h: undefined` 를 실어 보내면 updateEl 의
+// 펼치기(`{ ...el, ...patch }`)가 멀쩡한 높이까지 undefined 로 덮는다.
+function heightPatch(h: number | undefined): Partial<FreeEl> { return h == null ? {} : { h } }
+
 export function addRow(el: FreeEl, at: number): Partial<FreeEl> {
   const { R, C, cells } = grid(el)
   const nc = cells.map((row) => row.slice())
@@ -94,7 +213,8 @@ export function addRow(el: FreeEl, at: number): Partial<FreeEl> {
   const merges = (el.merges || []).map((m) => ({ ...m }))
   for (const m of merges) { if (at <= m.r) m.r++; else if (at <= m.r + m.rs - 1) m.rs++ }
   const st = remapCellStyles(el, (r, c) => [r >= at ? r + 1 : r, c])
-  return { rows: R + 1, cells: nc, merges, ...st, rowh: insertSize(el.rowh, at, R) }
+  return { rows: R + 1, cells: nc, merges, ...st, rowh: insertSize(el.rowh, at, R),
+           ...heightPatch(rowChangedHeight(el, at, 1)) }
 }
 
 export function delRow(el: FreeEl, at0: number): Partial<FreeEl> {
@@ -112,7 +232,8 @@ export function delRow(el: FreeEl, at0: number): Partial<FreeEl> {
     if (m.rs >= 1 && m.cs >= 1 && !(m.rs === 1 && m.cs === 1)) merges.push(m)
   }
   const st = remapCellStyles(el, (r, c) => (r === at ? null : [r > at ? r - 1 : r, c]))
-  return { rows: R - 1, cells: nc, merges, ...st, rowh: removeSize(el.rowh, at, R) }
+  return { rows: R - 1, cells: nc, merges, ...st, rowh: removeSize(el.rowh, at, R),
+           ...heightPatch(rowChangedHeight(el, at, -1)) }
 }
 
 export function addCol(el: FreeEl, at: number): Partial<FreeEl> {

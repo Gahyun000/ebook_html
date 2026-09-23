@@ -59,7 +59,27 @@ export default function RightPanel() {
   }
   const dark = !!(page && page.bg)
   const curPaper: PaperType = (page && page.paper) || 'blank'
-  const { W } = pageSize(orientation)
+  const { W, H: PAGE_H } = pageSize(orientation)
+
+  /**
+   * 행이 늘어 표가 커질 때 **종이 밖으로 밀려나지 않게** 자른다(EVER-SKETCH1 bc8baa1).
+   *
+   * addRow 는 「행 높이는 그대로, 표 높이가 따라간다」만 안다 — 종이가 얼마나 큰지는
+   * 모른다(순수 함수라 그래야 한다). 종이를 아는 것은 여기다.
+   * 자를 때 y 도 같이 올린다. 높이만 자르면 아래쪽에 있던 표가 종이 끝에 걸린 채
+   * 위로 자라지 못해, 결국 행 높이가 다시 줄어든다.
+   * (원본은 양식 슬롯 표에만 걸었다. 이 저장소에는 슬롯이 없어 모든 표에 건다.)
+   */
+  function fitPage(cur: FreeEl, pt: Partial<FreeEl>): Partial<FreeEl> {
+    if (pt.h == null || cur.type !== 'table') return pt
+    const h = Math.min(pt.h, PAGE_H)
+    const y = Math.min(Math.max(0, cur.y), Math.max(0, PAGE_H - h))
+    return { ...pt, h, y }
+  }
+  /** 이 표가 **종이 높이를 다 쓴** 상태인가 — 여기서 행을 더 넣으면 줄 높이가 줄어든다.
+   *  「표 아래끝이 종이 아래끝에 닿았는가」로 재면 안 된다. 위가 비어 있으면 fitPage 가
+   *  표를 위로 밀어 올려 계속 커질 수 있다. 진짜 천장은 종이 높이 자체다. */
+  const tableAtCeiling = !!el && el.type === 'table' && el.h >= PAGE_H - 1
 
   // 선택이 바뀌면(새 요소) 종류에 맞는 탭을 자동으로 연다(편집 중엔 안 튐 — id 변화에만 반응).
   useEffect(() => {
@@ -123,7 +143,7 @@ export default function RightPanel() {
   function patchTable(pt: Partial<FreeEl>) {
     if (!page || !el) return
     pushSnap(page.id, JSON.stringify({ els: page.els, conns: page.conns, strokes: page.strokes, detached: page.detached }))
-    updateEl(page.id, el.id, pt)
+    updateEl(page.id, el.id, fitPage(el, pt))
     // 행/열이 줄었으면 활성 셀을 새 범위 안으로 당겨 준다.
     // 안 그러면 마지막 행을 두 번 지울 때 두 번째 삭제가 범위 밖을 가리켜 표가 어긋난다.
     const nr = pt.rows, ncl = pt.cols
@@ -164,6 +184,13 @@ export default function RightPanel() {
                 <button className="insp-pill" onClick={() => patchTable(addRow(el, ar + 1))}>↓ 아래 추가</button>
                 <button className="insp-pill danger" onClick={() => patchTable(delRow(el, ar))}>🗑 행 삭제</button>
               </div>
+              {/* 천장에 닿았을 때만 말한다. 늘 띄워 두면 아무도 안 읽는다. */}
+              {tableAtCeiling ? (
+                <div className="insp-hint warn">이 표가 종이 아래끝까지 찼어요. 여기서 행을 더 넣으면
+                  <b> 줄 높이가 줄어듭니다.</b> 표를 위로 옮기거나, 다음 장에 이어 적어 주세요.</div>
+              ) : (
+                <div className="insp-hint">행을 넣으면 <b>줄 높이는 그대로</b> 두고 표가 그만큼 커져요.</div>
+              )}
               <div className="insp-sec">열</div>
               <div className="insp-row">
                 <button className="insp-pill" onClick={() => patchTable(addCol(el, ac))}>← 왼쪽 추가</button>
@@ -201,7 +228,7 @@ export default function RightPanel() {
                 </select>
                 <label className="insp-check"><input type="checkbox" checked={el.headRow !== false} onChange={(e) => patchTable({ headRow: e.target.checked })} /> 헤더행</label>
               </div>
-              <span style={cap}>셀을 드래그하면 범위가 잡힙니다(Shift+클릭도 범위). 글자 수정은 표를 더블클릭. 표 자체를 옮길 땐 표 가장자리를 끌거나 방향키를 쓰세요.</span>
+              <span style={cap}>셀을 드래그하면 범위가 잡힙니다(Shift+클릭도 범위). 표 위쪽·왼쪽 띠를 누르면 열·줄 통째로, 띠의 경계선을 끌면 열 너비·행 높이가 바뀝니다. 글자 수정은 칸을 더블클릭. 표 자체를 옮길 땐 왼쪽 위 모서리의 ⠿ 손잡이를 끄세요.</span>
             </>)}
 
             {tab === 'style' && (<>

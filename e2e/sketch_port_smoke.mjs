@@ -300,6 +300,171 @@ STAGES.push(['2단계 · 표 칸 끌기 · ⠿ 이동 · 다시 열기', async (
   ok('[표] 다시 열어도 표와 글이 그대로다', (await again.count()) === 1 && text === '이식2', `표 ${await again.count()} · ${JSON.stringify(text)}`)
 }])
 
+// ── 3단계 ─────────────────────────────────────────────────
+// 표 편집(6817694 경계 끌기 · 17cb06d 보이게 · bc8baa1 행=표 높이 · e38d357 병합 넓히기·머리 띠 ·
+// 824ec0e 표엔 연결점 없음 · e6bc1d2 칸 ⌘Z · 미커밋 편집 중 다른 칸/테두리 · d57203f 한글 한 번)
+STAGES.push(['3단계 · 표 편집 · 한글 입력', async () => {
+  await freshBook()
+  const tblFel = () => layer().locator('.fel:has(.feltable)').first()
+  const cell = (r, c) => tblFel().locator(`.feltd[data-r="${r}"][data-c="${c}"]`)
+  const center = async (loc) => { const b = await loc.boundingBox(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 } }
+  const nSel = () => tblFel().locator('.feltd.cellsel').count()
+  const nEditing = () => layer().locator('.feltd[contenteditable="true"]').count()
+  const drag = async (from, to, steps = 6) => {
+    await p.mouse.move(from.x, from.y); await p.mouse.down()
+    for (let i = 1; i <= steps; i++) await p.mouse.move(from.x + (to.x - from.x) * i / steps, from.y + (to.y - from.y) * i / steps)
+    await p.mouse.up(); await p.waitForTimeout(200)
+  }
+  const lb = await layer().boundingBox()
+  const blank = { x: lb.x + lb.width - 15, y: lb.y + lb.height - 15 }
+
+  await p.locator('.ib[title="표"]').first().click()
+  await p.mouse.click(lb.x + lb.width * 0.3, lb.y + lb.height * 0.35)
+  await p.waitForTimeout(300)
+  ok('[표3] 표가 놓였다', (await layer().locator('.feltable').count()) === 1)
+
+  // ① 칸을 골라도 크기 손잡이가 Esc 없이 보인다 + 경계선 손잡이
+  await cell(0, 0).click(); await p.waitForTimeout(200)
+  ok('[표3] 칸을 골라도 크기 손잡이 8개가 그대로 보인다(Esc 없이)', (await layer().locator('.rs-h').count()) === 8,
+    String(await layer().locator('.rs-h').count()))
+  const gc = layer().locator('.trk-grip.trk-col'), gr = layer().locator('.trk-grip.trk-row')
+  ok('[표3] 열 경계 손잡이 1 · 행 경계 손잡이 1 (2×2 표)', (await gc.count()) === 1 && (await gr.count()) === 1,
+    `${await gc.count()} · ${await gr.count()}`)
+  const op = await gc.first().evaluate((n) => Number(getComputedStyle(n, '::before').opacity))
+  ok('[표3] 경계 손잡이가 **보인다**(opacity ≥ .5)', op >= 0.5, String(op))
+  if (SHOT_DIR) {
+    const tb = await tblFel().boundingBox()
+    await p.screenshot({ path: SHOT_DIR + '/stage3_table_handles.png',
+      clip: { x: tb.x - 60, y: tb.y - 60, width: tb.width + 120, height: tb.height + 120 } })
+  }
+
+  // ② 열 경계를 끌면 두 열 너비가 바뀌고 표 폭은 그대로
+  const w00 = (await cell(0, 0).boundingBox()).width, w01 = (await cell(0, 1).boundingBox()).width
+  const tw0 = (await tblFel().boundingBox()).width
+  await drag(await center(gc.first()), { ...(await center(gc.first())), x: (await center(gc.first())).x + 40 })
+  const w10 = (await cell(0, 0).boundingBox()).width, w11 = (await cell(0, 1).boundingBox()).width
+  const tw1 = (await tblFel().boundingBox()).width
+  ok('[표3] 열 경계를 끌면 왼쪽 열이 넓어지고 오른쪽이 좁아진다', w10 > w00 + 25 && w11 < w01 - 25,
+    `${w00.toFixed(1)}/${w01.toFixed(1)} → ${w10.toFixed(1)}/${w11.toFixed(1)}`)
+  ok('[표3] 표 전체 폭은 그대로다', Math.abs(tw1 - tw0) < 1, `${tw0.toFixed(1)} → ${tw1.toFixed(1)}`)
+  // 행 경계도
+  const h00 = (await cell(0, 0).boundingBox()).height, th0 = (await tblFel().boundingBox()).height
+  const rg = await center(gr.first())
+  await drag(rg, { x: rg.x, y: rg.y + 12 })
+  const h10 = (await cell(0, 0).boundingBox()).height, th1 = (await tblFel().boundingBox()).height
+  ok('[표3] 행 경계를 끌면 위 행이 높아지고 표 높이는 그대로다', h10 > h00 + 6 && Math.abs(th1 - th0) < 1,
+    `행 ${h00.toFixed(1)} → ${h10.toFixed(1)} · 표 ${th0.toFixed(1)} → ${th1.toFixed(1)}`)
+
+  // ③ 행을 넣으면 표가 그만큼 커진다(남은 행은 그대로)
+  await cell(1, 0).click(); await p.waitForTimeout(150)
+  const rh0 = (await cell(1, 0).boundingBox()).height, T0 = (await tblFel().boundingBox()).height
+  await p.locator('.insp-pill', { hasText: '↓ 아래 추가' }).first().click(); await p.waitForTimeout(250)
+  const rh1 = (await cell(1, 0).boundingBox()).height, T1 = (await tblFel().boundingBox()).height
+  ok('[표3] 행을 넣으면 표가 한 행만큼 커진다', T1 > T0 + rh0 * 0.8 && (await tblFel().locator('.feltd[data-c="0"]').count()) === 3,
+    `표 ${T0.toFixed(1)} → ${T1.toFixed(1)} (행 ${rh0.toFixed(1)})`)
+  ok('[표3] 남은 행의 높이는 그대로다', Math.abs(rh1 - rh0) < 1.5, `${rh0.toFixed(1)} → ${rh1.toFixed(1)}`)
+
+  // ④ 병합 칸에 닿으면 범위가 커진다 · 머리 띠
+  await drag(await center(cell(0, 0)), await center(cell(1, 0)))
+  await p.locator('.insp-pill', { hasText: '⤢ 병합' }).first().click(); await p.waitForTimeout(250)
+  ok('[표3] (0,0)~(1,0) 을 병합했다', (await cell(1, 0).count()) === 0)
+  const tbA = await tblFel().boundingBox()
+  await drag(await center(cell(0, 1)), await center(cell(0, 0)))
+  ok('[표3] 0행에서 2행 병합 칸으로 끌면 범위가 1행까지 커진다(병합·(0,1)·(1,1) = 3칸)', (await nSel()) === 3, String(await nSel()))
+  const tbB = await tblFel().boundingBox()
+  ok('[표3] 칸 안에서 끌어도 표는 제자리다', Math.abs(tbA.x - tbB.x) < 1 && Math.abs(tbA.y - tbB.y) < 1)
+  const bands = layer().locator('.trk-band.trk-band-col')
+  await bands.nth(1).click(); await p.waitForTimeout(150)
+  ok('[표3] 열 머리 띠를 누르면 그 열 통째로(3칸)', (await nSel()) === 3, String(await nSel()))
+
+  // ⑤ 편집 중 다른 칸을 누르면 편집이 끝나고 그 칸이 골라진다 → 그대로 끌면 범위
+  await cell(2, 0).dblclick(); await p.waitForTimeout(300)
+  ok('[표3] 칸 더블클릭 = 편집', (await nEditing()) > 0)
+  await p.keyboard.type('ab')
+  await drag(await center(cell(2, 1)), await center(cell(1, 1)))
+  ok('[표3] 편집 중 다른 칸을 누르면 편집이 끝난다', (await nEditing()) === 0, String(await nEditing()))
+  ok('[표3] …그리고 그대로 끌면 범위가 골라진다(2칸)', (await nSel()) === 2, String(await nSel()))
+  ok('[표3] 편집하던 칸의 글은 저장됐다', (await cell(2, 0).innerText()) === 'ab', JSON.stringify(await cell(2, 0).innerText()))
+
+  // ⑥ 편집 중 표 테두리를 잡으면 편집이 풀리고 표가 움직인다
+  await cell(2, 1).dblclick(); await p.waitForTimeout(300)
+  const tb2 = await tblFel().boundingBox()
+  await drag({ x: tb2.x + 2, y: tb2.y + tb2.height / 2 }, { x: tb2.x + 22, y: tb2.y + tb2.height / 2 + 10 })
+  const tb3 = await tblFel().boundingBox()
+  ok('[표3] 편집 중 표 테두리를 잡으면 편집이 풀린다', (await nEditing()) === 0, String(await nEditing()))
+  ok('[표3] …그리고 표가 움직인다', tb3.x - tb2.x > 10, `dx ${(tb3.x - tb2.x).toFixed(1)}`)
+
+  // ⑦ 칸 글자를 고치고 나온 뒤 ⌘Z 하면 고치기 전 글로
+  await cell(0, 1).dblclick(); await p.waitForTimeout(300)
+  const beforeTxt = await cell(0, 1).innerText()
+  await p.keyboard.press('ControlOrMeta+a'); await p.keyboard.type('고침')
+  await p.mouse.click(blank.x, blank.y); await p.waitForTimeout(250)
+  const midTxt = await cell(0, 1).innerText()
+  await p.keyboard.press('ControlOrMeta+z'); await p.waitForTimeout(250)
+  const undoTxt = await cell(0, 1).innerText()
+  ok('[표3] 칸 글을 고치고 나온 뒤 ⌘Z → 고치기 전 글', midTxt === '고침' && undoTxt === beforeTxt,
+    `${JSON.stringify(beforeTxt)} → ${JSON.stringify(midTxt)} → ⌘Z ${JSON.stringify(undoTxt)}`)
+
+  // ⑧ 한글 「가나」 가 한 번만 찍힌다 — IME 조합을 흉내 낸다(CDP imeSetComposition → insertText)
+  const cdp = await p.context().newCDPSession(p)
+  const ime = async (syllables) => {
+    for (const [mid, fin] of syllables) {
+      await cdp.send('Input.imeSetComposition', { text: mid, selectionStart: mid.length, selectionEnd: mid.length })
+      await cdp.send('Input.imeSetComposition', { text: fin, selectionStart: fin.length, selectionEnd: fin.length })
+      await cdp.send('Input.insertText', { text: fin })
+    }
+  }
+  // (가) 빈 칸을 더블클릭해 쓰기
+  await cell(2, 1).dblclick(); await p.waitForTimeout(300)
+  await ime([['ㄱ', '가'], ['ㄴ', '나']]); await p.waitForTimeout(150)
+  const typing = await cell(2, 1).innerText()
+  await p.mouse.click(blank.x, blank.y); await p.waitForTimeout(250)
+  const typed = await cell(2, 1).innerText()
+  ok('[표3] 빈 칸에 한글 「가나」 를 치면 「가나」 한 번(치는 중)', typing === '가나', JSON.stringify(typing))
+  ok('[표3] …나온 뒤에도 「가나」 한 번', typed === '가나', JSON.stringify(typed))
+  // (나) 칸을 고르고 곧바로 한글 — keydown 'Process'(IME) 가 편집을 켜고 첫 글자가 안 씹힌다
+  await cell(1, 1).click(); await p.waitForTimeout(150)
+  await cdp.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Process', code: 'KeyR', windowsVirtualKeyCode: 229, nativeVirtualKeyCode: 229 })
+  await ime([['ㄱ', '가'], ['ㄴ', '나']])
+  await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Process', code: 'KeyR', windowsVirtualKeyCode: 229, nativeVirtualKeyCode: 229 })
+  await p.waitForTimeout(150)
+  await p.mouse.click(blank.x, blank.y); await p.waitForTimeout(250)
+  const typed2 = await cell(1, 1).innerText()
+  ok('[표3] 칸을 고르고 바로 한글을 쳐도 「가나」 한 번(칸을 갈아 씀)', typed2 === '가나', JSON.stringify(typed2))
+
+  // ⑨ 표 칸을 잡아 끌어도 연결선이 생기지 않는다(표에는 연결점이 없다)
+  const conns0 = await layer().locator('.freeconn path[marker-end]').count()
+  const c11 = await center(cell(1, 1))
+  await p.mouse.click(blank.x, blank.y); await p.waitForTimeout(150)   // 표 고르기 풀기(연결점은 안 고른 요소에 뜬다)
+  await p.mouse.move(c11.x, c11.y); await p.waitForTimeout(200)
+  ok('[표3] 표에 마우스를 올려도 연결점이 안 뜬다', (await layer().locator('.cpt').count()) === 0, String(await layer().locator('.cpt').count()))
+  await drag(c11, { x: lb.x + lb.width * 0.8, y: lb.y + lb.height * 0.8 })
+  ok('[표3] 표 칸을 잡아 끌어도 연결선이 안 생긴다', (await layer().locator('.freeconn path[marker-end]').count()) === conns0)
+
+  // ⑩ 다시 열어도 열 너비·행 높이·칸 글이 그대로
+  const wA = (await cell(0, 0).boundingBox()).width, wB = (await cell(0, 1).boundingBox()).width
+  const TH = (await tblFel().boundingBox()).height
+  const hR = (await cell(0, 1).boundingBox()).height / (await cell(1, 1).boundingBox()).height
+  for (let i = 0; i < 30; i++) {
+    const s = await p.locator('.save-lab').innerText().catch(() => '')
+    if (s === '저장됨') break
+    await p.waitForTimeout(300)
+  }
+  await p.waitForTimeout(1200)
+  await p.goto(URL, { waitUntil: 'networkidle' })
+  await p.locator('.lib-open-hit').first().click()
+  await p.waitForSelector('.ax-app .axth', { timeout: 15000 }); await p.waitForTimeout(500)
+  const wA2 = (await cell(0, 0).boundingBox()).width, wB2 = (await cell(0, 1).boundingBox()).width
+  const TH2 = (await tblFel().boundingBox()).height
+  const hR2 = (await cell(0, 1).boundingBox()).height / (await cell(1, 1).boundingBox()).height
+  ok('[표3] 다시 열어도 행 높이 비율이 그대로다', Math.abs(hR2 - hR) < 0.02 && hR > 1.1, `${hR.toFixed(3)} → ${hR2.toFixed(3)}`)
+  ok('[표3] 다시 열어도 열 너비 비율이 그대로다', Math.abs(wA2 / wB2 - wA / wB) < 0.02, `${(wA / wB).toFixed(3)} → ${(wA2 / wB2).toFixed(3)}`)
+  ok('[표3] 다시 열어도 표 높이(행 추가분)가 그대로다', Math.abs(TH2 - TH) < 1, `${TH.toFixed(1)} → ${TH2.toFixed(1)}`)
+  const t21 = await cell(2, 1).innerText(), t11 = await cell(1, 1).innerText(), t20 = await cell(2, 0).innerText()
+  ok('[표3] 다시 열어도 칸 글(「ab」·「가나」·「가나」)이 그대로다', t20 === 'ab' && t21 === '가나' && t11 === '가나',
+    [t20, t21, t11].map((s) => JSON.stringify(s)).join(' · '))
+}])
+
 for (const [name, run] of STAGES) {
   console.log(`\n# ${name}`)
   try { await run() } catch (e) { ok(`${name} 실행 중 예외 없음`, false, String(e && e.message || e)) }

@@ -8,9 +8,9 @@
 // ② 다섯 자리가 **모두 같은 문**으로 들어오는지 본다 — 한 곳이라도 따로 놀면
 //    「여기선 되는데 저기선 안 된다」가 다시 생긴다. 이번 신고가 그 모양이었다.
 //
-// ebook_html 이식(EVER-SKETCH1 미커밋 wordSelect · 2026-09-21): 1단계는 **캔버스 글상자**만
-// 옮긴다. 표 칸 두 자리는 3단계(표 편집)에서, 카드 칸(PageView)·메모(NoteBlocks)는 이번
-// 이식 범위 밖이라 그 검사들은 뺐다. 들어오는 단계에서 원래 검사를 되살린다.
+// ebook_html 이식(EVER-SKETCH1 미커밋 wordSelect · 2026-09-21): 1단계는 **캔버스 글상자**,
+// 3단계는 **표 칸 두 자리**(원본 검사 그대로 되살림)를 옮겼다. 카드 칸(PageView)·메모(NoteBlocks)는
+// 이번 이식 범위 밖이라 그 두 검사만 뺐다.
 //
 // 실행: node --experimental-strip-types --import ./ts_register.mjs word_select.test.mjs
 import { readFileSync } from 'node:fs'
@@ -48,7 +48,11 @@ check(/onDoubleClick=\{\(e\) => \{\s*e\.stopPropagation\(\)\s*selectWordOrCaretA
   '[캔버스 글자 · 편집 중] 같은 기준 + 바깥 더블클릭으로 새지 않는다')
 check(/onPointerDown=\{\(e\) => e\.stopPropagation\(\)\}\s*onDoubleClick=\{\(e\) => \{\s*e\.stopPropagation\(\)\s*selectWordOrCaretAtPoint/.test(fl),
   '[캔버스 글자 · 편집 중] 글자 위 누름이 도형 끌기로 새지 않는다(끌어 고르기·세 번 누르기가 살아 있다)')
-// (표 칸 · 카드 칸 · 메모 검사는 위 머리말대로 뺐다)
+check(/if \(editingThis\) \{ e\.stopPropagation\(\); selectWordOrCaretAtPoint\(e\.currentTarget, e\.clientX, e\.clientY\); return \}/.test(fl),
+  '[표 칸 · 편집 중] 브라우저 기본(ICU)에 맡기지 않는다')
+check(/node\.focus\(\)\s*selectWordOrCaretAtPoint\(node, x, y\)/.test(fl),
+  '[표 칸 · 켤 때] 켜자마자 누른 낱말까지')
+// (카드 칸 · 메모 검사는 위 머리말대로 뺐다)
 // 편집 중 도형 안쪽 여백을 더블클릭해도 같은 규칙(낱말 아니면 커서)으로 맞춘다.
 check(/if \(editing === el\.id && editRef\.current\?\.node\) \{\s*selectWordOrCaretAtPoint\(editRef\.current\.node, e\.clientX, e\.clientY\); return/.test(fl),
   '[캔버스 글자 · 편집 중 · 글자 칸 바깥] 브라우저가 고른 마지막 낱말이 남지 않는다')
