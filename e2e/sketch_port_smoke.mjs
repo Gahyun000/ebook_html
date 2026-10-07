@@ -1200,9 +1200,11 @@ STAGES.push(['7단계 · 여럿을 선과 함께 복사 · 붙여넣기', async 
   const after = (await fels().allInnerTexts()).map((t) => t.trim())
   ok('[트리 쪽] 다시 앉혀도 **두 그림이 다 남는다**',
     ['기획', '설계', '검수', '배포'].every((t) => after.filter((a) => a === t).length === 2), after.join(','))
-  // 상자 열 + 흐린 것 둘. 흐린 사본이 진짜 상자로 굳었다면 「개발」 이 다섯(상자 열하나 + 흐린 것 …)이 된다.
-  ok('[트리 쪽] 「개발」 은 넷이다 — 진짜 둘 + 흐린 것 둘(붙인 흐린 상자가 진짜 상자로 굳지 않는다)',
-    after.length === 12 && after.filter((a) => a === '개발').length === 4, `${after.length}개 · 개발 ${after.filter((a) => a === '개발').length}`)
+  // 2026-10-07 고침: 전에는 「상자 열 + 흐린 것 둘 = 열둘 · 개발 넷」 이었다. 이제 접거나 가지를 붙여 다시 앉히면 **아래 띠를 펴서**
+  // 옆으로 뻗는다(흐린 「다시 놓은 부모」 가 없어진다 — tree_keys.test.mjs 5번). 본뜻은 그대로다: 붙인 흐린 상자가
+  // 진짜 상자로 굳었다면 「개발」 이 셋이 되고 상자가 열하나가 된다.
+  ok('[트리 쪽] 「개발」 은 둘이다 — 상자 열 · 흐린 것 없음(붙인 흐린 상자가 진짜 상자로 굳지 않는다)',
+    after.length === 10 && after.filter((a) => a === '개발').length === 2, `${after.length}개 · 개발 ${after.filter((a) => a === '개발').length}`)
   ok('[트리 쪽] 다시 앉힌 뒤에도 선이 열 그대로다', (await lines().count()) === 10, String(await lines().count()))
   const rects = await fels().evaluateAll((ns) => ns.map((n) => { const r = n.getBoundingClientRect(); return [r.left, r.top, r.right, r.bottom] }))
   let over = 0
@@ -1615,9 +1617,11 @@ STAGES.push(['13단계 · 작업면 · 가지 키', async () => {
   await p.keyboard.press('Space'); await p.waitForTimeout(450)
   ok('[가지 키] Space = 자식 — 상자가 하나 는다(2 → 3)', (await layer().locator('.fel').count()) === 3, String(await layer().locator('.fel').count()))
   ok('[가지 키] 붙이자마자 **글을 친다**(글칸에 초점)', await p.evaluate(() => !!document.activeElement && document.activeElement.isContentEditable))
-  ok('[가지 키] 붙이면 묶음이 **기준 크기 안에 다시 앉는다**', await inPaper(), JSON.stringify(await spots()))
-  const s2 = await st()
-  ok('[가지 키] 넘치는 것이 없어지니 슬라이드가 제 크기로 돌아온다 — 막대도 · 안내도 없다', s2.ox === 'hidden' && s2.oy === 'hidden' && (await p.locator('.pv-out').count()) === 0, JSON.stringify(s2))
+  // 2026-10-07 고침: 전에는 「묶음이 기준 크기 안에 다시 앉는다」 였다. 이제 **고른 상자는 제자리 · 크기 그대로**이고 가지가 옆으로 뻗는다.
+  const sp2 = await spots()
+  ok('[가지 키] 고른 상자가 **제자리 · 제 크기**다(왼쪽 위 격자로 끌려가지 않는다)', sp2[0][0] === sp[0][0] && sp2[0][1] === sp[0][1] && sp2[0][2] === sp[0][2] && sp2[0][3] === sp[0][3],
+    `${JSON.stringify(sp[0])} → ${JSON.stringify(sp2[0])}`)
+  ok('[가지 키] 새 상자가 고른 상자와 **같은 크기**로 오른쪽에 붙는다', sp2[2][2] === sp[0][2] && sp2[2][3] === sp[0][3] && sp2[2][0] > sp2[0][0] + sp2[0][2], JSON.stringify(sp2))
   await p.keyboard.type('alpha'); await p.keyboard.press('Enter'); await p.waitForTimeout(300)
   ok('[가지 키] 글칸의 Enter = 글 끝내기(저장) — 줄을 나누지 않는다',
     (await layer().locator('.fel', { hasText: 'alpha' }).count()) === 1 && !(await p.evaluate(() => !!document.activeElement && document.activeElement.isContentEditable)))
@@ -1632,7 +1636,7 @@ STAGES.push(['13단계 · 작업면 · 가지 키', async () => {
   const ym = (await layer().locator('.fel', { hasText: 'mid' }).evaluate((n) => parseFloat(n.style.top)))
   const yb2 = (await layer().locator('.fel', { hasText: 'beta' }).evaluate((n) => parseFloat(n.style.top)))
   ok('[가지 키] Shift+Enter = 앞 형제 — alpha · mid · beta 순', ya < ym && ym < yb2, `alpha ${ya} · mid ${ym} · beta ${yb2}`)
-  ok('[가지 키] 다섯 상자가 모두 종이 안 · 겹침 없음', (await inPaper()) && await (async () => {
+  ok('[가지 키] 다섯 상자 — 겹침 없음', await (async () => {
     const v = await spots(); for (let i = 0; i < v.length; i++) for (let j = i + 1; j < v.length; j++) {
       const a = v[i], b2 = v[j]; if (a[0] < b2[0] + b2[2] && b2[0] < a[0] + a[2] && a[1] < b2[1] + b2[3] && b2[1] < a[1] + a[3]) return false }
     return true })(), JSON.stringify(await spots()))
@@ -1674,7 +1678,7 @@ STAGES.push(['13단계 · 작업면 · 가지 키', async () => {
   await p.keyboard.press('Space'); await p.waitForTimeout(450)
   ok('[가지 키] 배율 단추를 누른 뒤 도형을 고르고 Space — **배율은 그대로, 자식이 붙는다**',
     (await pct()) === zA && (await layer().locator('.fel').count()) === nA + 1, `배율 ${zA}% → ${await pct()}% · 상자 ${nA} → ${await layer().locator('.fel').count()}`)
-  await p.keyboard.press('Enter'); await p.waitForTimeout(250)                   // 글 끝내기(고른 채로 남는다)
+  await p.keyboard.type('x'); await p.keyboard.press('Enter'); await p.waitForTimeout(250)   // 이름을 치고 확정(고른 채로 남는다)
   // 도형을 고른 채 배율 단추를 누르고 곧바로 Space — 단추가 초점을 가져가지 않는다.
   await p.locator('.pv-zoom button', { hasText: '+' }).first().click(); await p.waitForTimeout(250)
   const zB = await pct(), nB = await layer().locator('.fel').count()
@@ -1685,32 +1689,64 @@ STAGES.push(['13단계 · 작업면 · 가지 키', async () => {
 }])
 
 // 2026-10-06 · 화면 기록 오후 5.10.16 — 자식 다섯 + 손자, 거기서 **넷째 단**. 가로 종이는 세 단까지라 아래 띠로 접히며
-// 위 띠와 포개졌다(흐린 상자가 끼어들고 상자가 겹침). 이제 포개지 않고 더 큰 슬라이드에 앉힌다(tree_keys.test.mjs 7번).
+// 위 띠와 포개졌다(흐린 상자가 끼어들고 상자가 겹침).
+// 2026-10-07 · 화면 기록 오전 10.57.49 — ① 상자가 제자리에서 시작하지 않고 모양이 바뀜 ② 넷째 단부터 「새 트리」(아래 띠)
+// ③ 자식을 붙일 때마다 빈 곳 → 도형 → Space. 이제 **제자리 · 모양 그대로 · 접지 않고 계속 뻗고 · 마우스 없이 이어 붙인다**(tree_keys.test.mjs).
 STAGES.push(['13단계 · 넷째 단(영상의 그림)', async () => {
   await freshBook()
   await deselect()
   await panel6().locator('.insp-row.seg button', { hasText: '가로' }).click(); await p.waitForTimeout(350)
   const lb = await layer().boundingBox(); const z = lb.width / 640
   await p.keyboard.press('r'); await p.mouse.click(lb.x + 120 * z, lb.y + 240 * z); await p.waitForTimeout(250)
-  const key = async (k, n = 1) => { for (let i = 0; i < n; i++) { await p.keyboard.press(k); await p.waitForTimeout(260) } }
-  await key('Space'); await key('Enter')                       // 자식 1 (글 끝내기)
-  for (let i = 0; i < 4; i++) { await key('Enter'); await key('Enter') }   // 형제 넷 → 자식 다섯
-  await key('ArrowUp', 4)                                      // 첫 자식으로
-  await key('Space'); await key('Enter')                       // 손자(셋째 단)
+  const key = async (k, n = 1) => { for (let i = 0; i < n; i++) { await p.keyboard.press(k); await p.waitForTimeout(280) } }
   const spots = () => layer().locator('.fel').evaluateAll((ns) => ns.map((n) => [parseFloat(n.style.left), parseFloat(n.style.top), parseFloat(n.style.width), parseFloat(n.style.height)]))
   const overlaps = (v) => { let n = 0; for (let i = 0; i < v.length; i++) for (let j = i + 1; j < v.length; j++) {
     const a = v[i], b2 = v[j]; if (a[0] < b2[0] + b2[2] && b2[0] < a[0] + a[2] && a[1] < b2[1] + b2[3] && b2[1] < a[1] + a[3]) n++ } return n }
-  const v0 = await spots()
-  ok('[넷째 단] (준비) 뿌리 + 자식 다섯 + 손자 = 일곱 · 겹침 없음', v0.length === 7 && overlaps(v0) === 0, `${v0.length}개 · 겹친 쌍 ${overlaps(v0)}`)
-  await key('Space'); await key('Enter')                       // 넷째 단 — 영상에서 뒤엉킨 자리
+  const editing = () => p.evaluate(() => !!document.activeElement && document.activeElement.isContentEditable)
+  const root0 = (await spots())[0]
+
+  // **마우스 없이 이어 붙인다** — Space(자식) · Enter(형제) · Enter(형제) · Space(그 상자의 자식).
+  await key('Space')
   const v1 = await spots()
-  ok('[넷째 단] 손자에 자식을 붙여도 **포개지지 않는다**(흐린 상자도 안 끼어든다)', v1.length === 8 && overlaps(v1) === 0, `${v1.length}개 · 겹친 쌍 ${overlaps(v1)} · ${JSON.stringify(v1.map((a) => [a[0], a[1]]))}`)
-  await key('Enter'); await key('Enter'); await key('Enter'); await key('Enter')   // 그 형제 둘
+  ok('[이어 붙이기] Space = 자식 · **고른 상자는 제자리 · 제 크기**', v1.length === 2 && JSON.stringify(v1[0]) === JSON.stringify(root0), `${JSON.stringify(root0)} → ${JSON.stringify(v1[0])}`)
+  ok('[이어 붙이기] 새 상자는 고른 상자와 **같은 크기**로 오른쪽 같은 높이에', v1[1][2] === root0[2] && v1[1][3] === root0[3] && v1[1][0] > root0[0] + root0[2] && v1[1][1] === root0[1], JSON.stringify(v1[1]))
+  await key('Enter'); await key('Enter')
+  ok('[이어 붙이기] 아무것도 안 치고 **Enter · Enter → 형제 둘**(빈 곳을 누르지 않고)', (await spots()).length === 4, String((await spots()).length))
+  await key('Space')
   const v2 = await spots()
-  ok('[넷째 단] 거기에 형제를 더 붙여도 겹침 없음', v2.length === 10 && overlaps(v2) === 0, `${v2.length}개 · 겹친 쌍 ${overlaps(v2)}`)
+  ok('[이어 붙이기] 이어서 **Space → 그 상자의 자식**(셋째 단)', v2.length === 5 && v2[4][0] > v2[3][0] + v2[3][2], JSON.stringify(v2.map((a) => [a[0], a[1]])))
+  ok('[이어 붙이기] 뿌리는 여전히 제자리 · 겹침 없음', JSON.stringify(v2[0]) === JSON.stringify(root0) && overlaps(v2) === 0)
+  // 글자를 치면 이름이 된다 — 그 뒤의 Space 는 띄어쓰기, Enter 는 확정.
+  await p.keyboard.type('ab'); await key('Space'); await p.keyboard.type('cd')
+  ok('[이어 붙이기] **글자를 친 뒤의 Space 는 띄어쓰기**(상자가 안 는다)', (await spots()).length === 5 && await editing(), String((await spots()).length))
+  await key('Enter')
+  ok('[이어 붙이기] Enter = 이름 확정 「ab cd」', (await layer().locator('.fel', { hasText: 'ab cd' }).count()) === 1 && !(await editing()) && (await spots()).length === 5)
+  // 방금 붙인 글칸에서 방향키 — 글을 끝내고 옮겨 간다
+  await key('Space'); await key('ArrowLeft')
+  ok('[이어 붙이기] 아무것도 안 친 글칸에서 **방향키 → 부모로 옮겨 간다**', !(await editing()) && ((await p.locator('.stage .fel.sel').first().innerText().catch(() => '')).trim() === 'ab cd'))
+  await p.keyboard.press('ControlOrMeta+z'); await p.waitForTimeout(300)          // 방금 붙인 것 하나만 되돌린다
+  ok('[이어 붙이기] ⌘/Ctrl+Z 는 **한 번에 하나씩** 되돌린다(6 → 5)', (await spots()).length === 5, String((await spots()).length))
+
+  // **계속 뻗는다** — 넷째 · 다섯째 · 여섯째 단. 흐린 상자(아래 띠)가 안 생긴다.
+  await layer().locator('.fel', { hasText: 'ab cd' }).first().click(); await p.waitForTimeout(200)
+  await key('Space', 3)
+  const v3 = await spots()
+  const chain = v3.slice(4)                                   // ab cd 와 그 아래 셋
+  ok('[계속 뻗기] 넷째 · 다섯째 · 여섯째 단이 **한 줄로 오른쪽으로** 이어진다(새 트리로 접히지 않는다)',
+    v3.length === 8 && chain.every((a, i) => i === 0 || (a[0] > chain[i - 1][0] && a[1] === chain[0][1])), JSON.stringify(v3.map((a) => [a[0], a[1]])))
+  ok('[계속 뻗기] 겹침 없음', overlaps(v3) === 0, String(overlaps(v3)))
   const cap = (await p.locator('.pv-cap').innerText()).replace(/\s+/g, ' ')
-  ok('[넷째 단] 종이에 다 안 들어가면 슬라이드가 늘어난다 — 「줄여 담김」 안내', v2.some((a) => a[0] + a[2] > 640 || a[1] + a[3] > 482) && /줄여 담김/.test(cap), cap.slice(-30))
+  ok('[계속 뻗기] 넘친 만큼 슬라이드가 늘어난다 — 「줄여 담김」 안내', v3.some((a) => a[0] + a[2] > 640) && /줄여 담김/.test(cap), cap.slice(-30))
   if (SHOT_DIR) { await deselect(); await p.locator('.ax-stage-wrap').screenshot({ path: SHOT_DIR + '/s9/stage13_fourth_level.png' }); await p.locator('.axth.on').screenshot({ path: SHOT_DIR + '/s9/stage13_fourth_level_film.png' }) }
+
+  // 뿌리에서 Enter — 선 없는 또 하나의 뿌리가 그 아래에(사용자 결정)
+  await layer().locator('.fel').first().click(); await p.waitForTimeout(200)
+  const lines0 = await layer().locator('svg.freeconn path[marker-end]').count()
+  await key('Enter')
+  const v4 = await spots()
+  ok('[뿌리에서 Enter] 선 없는 **또 하나의 뿌리**가 아래에 생긴다(뿌리와 같은 x · 더 아래)', v4.length === 9 && v4[8][0] === v4[0][0] && v4[8][1] > v4[0][1]
+    && (await layer().locator('svg.freeconn path[marker-end]').count()) === lines0, JSON.stringify([v4[0], v4[8]]))
+  ok('[뿌리에서 Enter] 겹침 없음', overlaps(v4) === 0, String(overlaps(v4)))
 }])
 
 // ONLY=5단계 처럼 주면 그 이름이 든 단계만 돈다(고치는 동안 빨리 돌리려고). 비우면 전부.

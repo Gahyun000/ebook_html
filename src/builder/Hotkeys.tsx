@@ -8,6 +8,7 @@ import { copyParts, pasteParts } from '../canvas/clipboard'
 import type { Clip } from '../canvas/clipboard'
 import { isTreePage, treeShape, knownOf } from '../cards/treeOps'
 import { mindKey, navTarget } from './mindKeys'
+import { addTopic } from './mindActions'
 
 interface Props {
   presentOpen: boolean; helpOpen: boolean; tutorialOpen: boolean
@@ -181,14 +182,7 @@ export default function Hotkeys(props: Props) {
         if (act === 'child' || act === 'sibling' || act === 'before') {
           e.preventDefault()
           if (e.repeat) return
-          snap(mind.page)
-          // 접힌 상자에 자식을 붙이면 붙이자마자 안 보인다 — 먼저 편다.
-          if (act === 'child' && mind.page.els.some((x) => x.id === mind.id && x.folded)) bs.treeFold(mind.page.id, mind.id)
-          const had = new Set(mind.page.els.map((x) => x.id))
-          bs.treeAdd(mind.page.id, mind.id, act)
-          const now = useBuilder.getState().pages.find((pg) => pg.id === mind.page.id)
-          const made = now ? now.els.find((x) => !had.has(x.id) && x.echoOf == null) : null
-          if (made) { ui.setSel(made.id); ui.requestEdit(made.id); ui.setReveal(made.id) }
+          addTopic(mind.page.id, mind.id, act)       // 기억 · 붙이기 · 고르기 · 편집 열기 · 보이게 굴리기
           return
         }
         if (mind.tree && (act === 'fold' || act === 'unfold' || act === 'unfoldAll')) {

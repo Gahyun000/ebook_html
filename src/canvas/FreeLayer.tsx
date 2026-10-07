@@ -17,6 +17,8 @@ import { bandRange, coveredSet, dragTrack, growToMerges, mergeCovering, sizeTrac
 import { cellBackground, cellTextColor } from './cellColor'
 import ColorPicker from '../builder/chrome/ColorPicker'
 import { treeShape, descendantCount, knownOf, isTreePage } from '../cards/treeOps'
+import { mindKey, navTarget } from '../builder/mindKeys'
+import { addTopic } from '../builder/mindActions'
 
 interface Props { page: Page; W: number; H: number; SC: number; interactive: boolean }
 const ADDABLE = ['box', 'round', 'ellipse', 'diamond', 'triangle', 'hexagon', 'pentagon', 'parallelogram', 'chevron', 'arrowR', 'arrowL', 'arrowU', 'arrowD', 'star5', 'star4', 'banner', 'callout', 'text', 'sticky', 'image', 'icon', 'table', 'wordart', 'note']
@@ -217,9 +219,12 @@ export default function FreeLayer({ page, W, H, interactive }: Props) {
   // 밖에서는 직접 못 연다. 한 번 받고 비운다.
   const editReq = useCanvasUI((s) => s.editReq)
   const requestEdit = useCanvasUI((s) => s.requestEdit)
+  // **방금 키로 붙여 연 글칸 — 아직 아무것도 안 쳤다**(2026-10-07). 이 동안은 Space · Enter · 방향키가 글이 아니라
+  // 가지 키로 듣는다(알마인드). 그래야 빈 곳을 누르고 도형을 다시 고르지 않고도 이어 붙인다. 글이 들어오면 푼다.
+  const pristineRef = useRef<number | null>(null)
   useEffect(() => {
     if (!interactive || editReq == null) return
-    if (page.els.some((e) => e.id === editReq)) startEditing(editReq)
+    if (page.els.some((e) => e.id === editReq)) { startEditing(editReq); pristineRef.current = editReq }
     requestEdit(null)
   }, [editReq])
   const [penPts, setPenPts] = useState<[number, number][] | null>(null)
@@ -1162,12 +1167,37 @@ export default function FreeLayer({ page, W, H, interactive }: Props) {
                       // **가지 상자에서는 Enter 가 글을 끝낸다**(알마인드 · 2026-10-06). 그래야 「Space → 글 → Enter →
                       // Enter(형제)」 로 손을 안 떼고 이어 간다. 줄바꿈은 Shift+Enter. 트리 밖 도형은 예전 그대로다.
                       onKeyDown={(e) => {
-                        if (e.key !== 'Enter' || e.shiftKey || e.metaKey || e.ctrlKey || e.altKey || isComposingKey(e)) return
-                        if (!tshape || !tshape.members.includes(el.echoOf ?? el.id)) return
+                        if (isComposingKey(e)) return
+                        const tid = el.echoOf ?? el.id
+                        if (!tshape || !tshape.members.includes(tid)) return
+                        // 붙인 뒤 아무것도 안 쳤으면 **가지 키가 그대로 듣는다** — Space 자식 · Enter 형제 · 방향키 옮겨 가기.
+                        if (pristineRef.current === el.id) {
+                          const act = mindKey(e.nativeEvent)
+                          if (act === 'child' || act === 'sibling' || act === 'before') {
+                            e.preventDefault(); e.stopPropagation()
+                            if (e.repeat) return
+                            pristineRef.current = null
+                            endEditing(); addTopic(page.id, tid, act)
+                            return
+                          }
+                          if (!e.shiftKey && !e.altKey && !e.metaKey && !e.ctrlKey && e.key.startsWith('Arrow')) {
+                            e.preventDefault(); e.stopPropagation()
+                            pristineRef.current = null
+                            const to = navTarget(tshape, page.treeDir || 'LR', tid, e.key)
+                            endEditing()
+                            if (to != null) { setSel(to); setReveal(to) }
+                            return
+                          }
+                        }
+                        if (e.key !== 'Enter' || e.shiftKey || e.metaKey || e.ctrlKey || e.altKey) return
                         e.preventDefault(); e.stopPropagation()
                         endEditing()
                       }}
-                      onBlur={() => { endEditing() }}>{el.text}</div>
+                      onInput={() => { pristineRef.current = null }}
+                      onCompositionStart={() => { pristineRef.current = null }}
+                      onMouseDown={() => { pristineRef.current = null }}
+                      // 자기 글칸이 아직 편집 대상일 때만 끝낸다 — 앞 상자의 늦은 blur 가 방금 연 새 상자의 편집을 끄지 않게.
+                      onBlur={(e) => { if (!editRef.current || editRef.current.node === e.currentTarget) endEditing() }}>{el.text}</div>
                   : <div className="feltext" style={txtStyle}>{el.text}</div>)}
             {active && isNote && editingThis ? <div className="note-drag" title="드래그해서 이동">⠿</div> : null}
           </div>

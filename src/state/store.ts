@@ -3,8 +3,8 @@ import { cardByKey } from '../cards/registry'
 import { pageSize } from '../cards/sizing'
 import { mindmapParts } from '../cards/mindmapEls'
 import { parseMermaid } from '../cards/mermaid'
-import { treeParts, NODE_W, NODE_H } from '../cards/treeEls'
-import { treeShape, layoutTree, newNode, TREE_CONN, isTreePage } from '../cards/treeOps'
+import { treeParts, LR_COL, LR_ROW, TD_COL, TD_ROW, PAD_X, PAD_TOP } from '../cards/treeEls'
+import { treeShape, layoutTree, newNode, TREE_CONN } from '../cards/treeOps'
 import type { ImportedDoc } from '../import/htmlImport'
 import { polish } from '../builder/polish'
 import { dropHistory, popDocRedo, popDocSnap, pushDocRedo, pushDocSnap, pushDocUndoRaw } from '../canvas/history'
@@ -135,18 +135,47 @@ export function nextElId(): number { return elUid++ }
  * 그래서 트리를 앉힌 뒤에는 늘 이걸 부른다.
  */
 /**
- * 트리를 앉히되, **이 종이에 안 들어가 포개지면 더 큰 슬라이드에 앉힌다**(2026-10-06).
+ * 키 · 단추로 가지를 붙이고 지우고 접을 때 트리를 앉힌다(2026-10-07 다시 씀).
  *
- * `layoutTree` 는 종이가 모자라면 아래 띠로 접는데, 위 띠의 줄이 많으면 아래 띠가 그 위에 포개진다
- * (가로 종이에서 자식 다섯 + 넷째 단 — 화면 기록 오후 5.10.16). 슬라이드는 넘치면 같은 비율로 늘어나므로
- * (workArea.growOf), 포개는 대신 종이를 그 비율로 키워 가며 **안 겹칠 때까지** 다시 앉힌다.
- * 이북에는 늘어난 슬라이드를 줄여 담는다. 키로 붙이고 지우고 접는 길에서만 쓴다 — 카드로 처음 펼칠 때는
- * 고르는 화면이 「넘칩니다」 로 미리 말하므로 예전 그대로다.
+ * `layoutTree` 는 **종이 안에** 앉히려고 간격을 줄이고, 모자라면 아래 띠로 접어 흐린 부모(echo)를 놓는다 — 카드로 처음
+ * 펼칠 때는 그게 맞다. 하지만 손으로 붙여 나가는 가지는 사람이 **계속 뻗으려고** 붙이는 것이고, 슬라이드는 넘치면
+ * 늘어난다(workArea.growOf · 이북에는 줄여 담김). 그래서 여기서는 —
+ *   · **접지 않는다**: 아주 큰 가상 종이에 앉혀 띠 하나 · 줄이지 않은 간격을 얻는다(echo 가 안 생긴다).
+ *   · **상자 크기를 그대로 둔다**: 간격을 가장 큰 상자에 맞춘다(전에는 132×38 로 바꿨다 — 「도형이 바뀐다」).
+ *   · **제자리에서 시작한다**: 첫 뿌리가 원래 있던 자리에 오도록 트리를 통째로 옮긴다. 위 · 왼쪽으로 나가면
+ *     여백 안으로만 밀어 넣는다(전에는 늘 종이 왼쪽 위 격자에서 시작했다).
+ * `layoutTree` 자체는 안 건드린다 — 관계 읽기 · 접힘 · 줄 매기기는 그대로 쓴다.
  */
-function seatTree(els: FreeEl[], conns: Conn[], W: number, H: number, want: 'LR' | 'TD', known: number[]) {
-  let laid = layoutTree(els, conns, W, H, want, known)
-  for (let f = 1.25; laid.overlapping > 0 && f <= 6; f += 0.25) laid = layoutTree(els, conns, W * f, H * f, want, known)
-  return laid
+const SEAT_PAPER = 100000, SEAT_PAD = 8
+function seatTree(els: FreeEl[], conns: Conn[], want: 'LR' | 'TD', known: number[]) {
+  const flat = layoutTree(els, conns, SEAT_PAPER, SEAT_PAPER, want, known)
+  const shape = treeShape(flat.els, flat.conns, known)
+  const mine = new Set(shape.members.filter((id) => !shape.hidden.has(id)))
+  const live = flat.els.filter((e) => mine.has(e.id))
+  if (!live.length) return flat
+  const lr = flat.dir === 'LR'
+  const baseX = lr ? LR_COL : TD_COL, baseY = lr ? LR_ROW : TD_ROW
+  const maxW = Math.max(...live.map((e) => e.w)), maxH = Math.max(...live.map((e) => e.h))
+  const stepX = Math.max(baseX, maxW + (lr ? 60 : 24)), stepY = Math.max(baseY, maxH + (lr ? 18 : 50))
+  // 격자 자리(칸 · 줄 번호)를 새 간격으로 옮기고, 작은 상자는 제 칸의 가운데에 둔다.
+  const at = new Map<number, { x: number; y: number }>()
+  for (const e of live) {
+    at.set(e.id, {
+      x: ((e.x - PAD_X) / baseX) * stepX + (lr ? 0 : (maxW - e.w) / 2),
+      y: ((e.y - PAD_TOP) / baseY) * stepY + (lr ? (maxH - e.h) / 2 : 0),
+    })
+  }
+  const root = shape.roots.find((id) => mine.has(id))
+  const was = root != null ? els.find((e) => e.id === root) : undefined
+  const now = root != null ? at.get(root) : undefined
+  let dx = was && now ? was.x - now.x : PAD_X, dy = was && now ? was.y - now.y : PAD_TOP
+  const minX = Math.min(...[...at.values()].map((v) => v.x + dx)), minY = Math.min(...[...at.values()].map((v) => v.y + dy))
+  if (minX < SEAT_PAD) dx += SEAT_PAD - minX
+  if (minY < SEAT_PAD) dy += SEAT_PAD - minY
+  return { ...flat, els: flat.els.map((e) => {
+    const v = at.get(e.id)
+    return v ? { ...e, x: Math.round(v.x + dx), y: Math.round(v.y + dy) } : e
+  }) }
 }
 function claimIds(els: FreeEl[]): void { for (const e of els) if (e && e.id >= elUid) elUid = e.id + 1 }
 // 새 페이지의 필드는 빈칸으로 시작한다.
@@ -384,7 +413,6 @@ export const useBuilder = create<BuilderState>((set, get) => ({
   reorderEl: (pageId, elId, toFront) => set((s) => ({ pages: mapPage(s.pages, pageId, (p) => { const i = p.els.findIndex((e) => e.id === elId); if (i < 0) return p; const els = [...p.els]; const e = els.splice(i, 1)[0]; if (toFront) els.push(e); else els.unshift(e); return { ...p, els } }) })),
   setCanvas: (pageId, data) => set((s) => ({ pages: mapPage(s.pages, pageId, (p) => ({ ...p, els: data.els, conns: data.conns, strokes: data.strokes, ...(data.detached !== undefined ? { detached: data.detached } : {}) })) })),
   treeAdd: (pageId, elId, kind) => set((s) => {
-    const { W, H } = pageSize(s.orientation)
     return { pages: mapPage(s.pages, pageId, (p) => {
       const known = p.treeRoots || (p.treeRoot != null ? [p.treeRoot] : [])
       const shape = treeShape(p.els, p.conns, known)
@@ -393,7 +421,13 @@ export const useBuilder = create<BuilderState>((set, get) => ({
       // **손으로 놓은 상자에서도 시작한다**(2026-10-06 알마인드 키). 선이 하나도 없는 상자는 명단에 적어야
       // 트리에 남는다 — 안 적으면 「형제」 를 붙였을 때 고른 상자만 제자리에 남아 새 뿌리와 포개진다.
       if (elId != null && !shape.members.includes(elId) && p.els.some((e) => e.id === elId)) roots.push(elId)
-      let els = [...p.els, newNode(id, kind === 'root' ? '새 뿌리' : '새 상자')]
+      // **새 상자는 고른 상자를 닮는다**(2026-10-07) — 모양 · 크기 · 색 · 글자. 전에는 늘 네모 132×38 이었다.
+      const like = elId != null ? p.els.find((e) => e.id === elId) : undefined
+      const fresh = newNode(id, kind === 'root' ? '새 뿌리' : '새 상자')
+      const node: FreeEl = like ? { ...fresh, type: like.type, w: like.w, h: like.h, color: like.color, fs: like.fs, tcolor: like.tcolor,
+        bold: like.bold, italic: like.italic, underline: like.underline, align: like.align, borderColor: like.borderColor,
+        borderWidth: like.borderWidth, borderDash: like.borderDash, opacity: like.opacity, shadow: like.shadow } : fresh
+      const els = [...p.els, node]
       const conns = p.conns.slice()
       // 뿌리의 「형제」는 **또 하나의 뿌리**다. 부모가 없으니 이을 데가 없다.
       const parent = kind === 'root' ? null
@@ -411,13 +445,7 @@ export const useBuilder = create<BuilderState>((set, get) => ({
       } else {
         conns.push({ from: parent, to: id, ...TREE_CONN })
       }
-      // **처음 트리로 들어오는 쪽**은 상자 크기를 트리 상자에 맞춘다. 줄 · 칸 간격이 그 크기에 맞춘 값이라,
-      // 손으로 키워 둔 상자를 그대로 두면 아래 줄과 붙거나 겹친다. 이미 트리인 쪽은 건드리지 않는다.
-      if (!isTreePage(p)) {
-        const mine = new Set(treeShape(els, conns, roots).members)
-        els = els.map((e) => (mine.has(e.id) && (e.w !== NODE_W || e.h !== NODE_H) ? { ...e, w: NODE_W, h: NODE_H } : e))
-      }
-      const laid = seatTree(els, conns, W, H, p.treeDir || 'LR', roots)
+      const laid = seatTree(els, conns, p.treeDir || 'LR', roots)
       claimIds(laid.els)
       // 명단이 비어 있으면(손으로 이은 쪽에서 처음 붙였다) 지금의 뿌리를 적는다 — 그래야 이 쪽이
       // 트리 쪽으로 읽혀(`isTreePage`) 접기 손잡이와 패널 단추가 따라 나온다.
@@ -427,7 +455,6 @@ export const useBuilder = create<BuilderState>((set, get) => ({
     }) }
   }),
   treeRemove: (pageId, elId) => set((s) => {
-    const { W, H } = pageSize(s.orientation)
     return { pages: mapPage(s.pages, pageId, (p) => {
       const known = p.treeRoots || (p.treeRoot != null ? [p.treeRoot] : [])
       const shape = treeShape(p.els, p.conns, known)
@@ -439,17 +466,16 @@ export const useBuilder = create<BuilderState>((set, get) => ({
       const els = p.els.filter((e) => !gone.has(e.id))
       const conns = p.conns.filter((c) => !gone.has(c.from) && !gone.has(c.to))
       const roots = known.filter((id) => !gone.has(id))
-      const laid = seatTree(els, conns, W, H, p.treeDir || 'LR', roots)
+      const laid = seatTree(els, conns, p.treeDir || 'LR', roots)
       claimIds(laid.els)
       return { ...p, els: laid.els, conns: laid.conns, treeDir: laid.dir, treeRoots: roots, treeRoot: roots[0] }
     }) }
   }),
   treeFold: (pageId, elId) => set((s) => {
-    const { W, H } = pageSize(s.orientation)
     return { pages: mapPage(s.pages, pageId, (p) => {
       const known = p.treeRoots || (p.treeRoot != null ? [p.treeRoot] : [])
       const els = p.els.map((e) => (e.id === elId ? { ...e, folded: !e.folded } : e))
-      const laid = seatTree(els, p.conns, W, H, p.treeDir || 'LR', known)
+      const laid = seatTree(els, p.conns, p.treeDir || 'LR', known)
       claimIds(laid.els)
       return { ...p, els: laid.els, conns: laid.conns, treeDir: laid.dir }
     }) }
