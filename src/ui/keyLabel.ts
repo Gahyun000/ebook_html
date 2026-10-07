@@ -49,8 +49,8 @@ export function macLabels(style: KeyStyle): boolean {
   return style === 'auto' ? detectMac() : style === 'mac'
 }
 
-const MAC: Record<string, string> = { mod: '⌘', shift: '⇧', alt: '⌥', enter: '↵', del: '⌫' }
-const WIN: Record<string, string> = { mod: 'Ctrl', shift: 'Shift', alt: 'Alt', enter: 'Enter', del: 'Del' }
+const MAC: Record<string, string> = { mod: '⌘', ctrl: '⌃', shift: '⇧', alt: '⌥', enter: '↵', del: '⌫' }
+const WIN: Record<string, string> = { mod: 'Ctrl', ctrl: 'Ctrl', shift: 'Shift', alt: 'Alt', enter: 'Enter', del: 'Del' }
 
 /**
  * **중립 표기를 그 사람 글자로 옮긴다.** `mod+shift+Z` → `⌘⇧Z` 또는 `Ctrl+Shift+Z`.

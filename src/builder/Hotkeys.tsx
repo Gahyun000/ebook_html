@@ -1,9 +1,13 @@
 import { useEffect, useRef } from 'react'
-import { useBuilder } from '../state/store'
+import { useBuilder, nextElId } from '../state/store'
 import type { FreeEl, Page } from '../state/store'
 import { useCanvasUI } from '../state/canvasUI'
 import type { Tool } from '../state/canvasUI'
-import { pushSnap, popSnap, pushRedo, popRedo, pushUndoRaw, nextUndoKind, nextRedoKind, mkFreeEl } from '../canvas/model'
+import { pushSnap, popSnap, pushRedo, popRedo, pushUndoRaw, nextUndoKind, nextRedoKind } from '../canvas/model'
+import { copyParts, pasteParts } from '../canvas/clipboard'
+import type { Clip } from '../canvas/clipboard'
+import { isTreePage, treeShape, knownOf } from '../cards/treeOps'
+import { mindKey, navTarget } from './mindKeys'
 
 interface Props {
   presentOpen: boolean; helpOpen: boolean; tutorialOpen: boolean
@@ -11,8 +15,13 @@ interface Props {
   onCloseHelp: () => void; onCloseTutorial: () => void
 }
 
-// 컴포넌트 밖 모듈 스코프 클립보드(복사/붙여넣기용)
-let CLIP: FreeEl | null = null
+// 컴포넌트 밖 모듈 스코프 클립보드(복사/붙여넣기용).
+// **고른 것 전부와 그 사이의 선**을 든다(2026-10-02 · canvas/clipboard.ts). 전에는 요소 한 개라
+// 머메이드 트리를 통째로 골라 복사해도 마지막 상자 하나만 붙었다.
+let CLIP: Clip | null = null
+// 같은 것을 **몇 번째** 붙이는가. 붙일 때마다 한 칸씩 더 민다 — 늘 같은 자리면 여럿이라
+// 정확히 포개져서 붙은 줄을 모른다. 새로 복사하면 처음으로 돌아간다.
+let PASTED = 0
 
 // 단일 키 → 도구 (Whimsical/Figma식)
 const TOOL_KEYS: Record<string, Tool> = {
@@ -46,11 +55,17 @@ export default function Hotkeys(props: Props) {
       const els = ids.map((id) => p.els.find((e) => e.id === id)).filter((e): e is FreeEl => !!e)
       return els.length ? { page: p, els } : null
     }
-    function cloneAt(src: FreeEl, dx: number, dy: number): FreeEl {
-      const n = mkFreeEl(src.type, src.x + dx, src.y + dy)
-      n.w = src.w; n.h = src.h; n.text = src.text; n.color = src.color; n.fs = src.fs
-      if (src.src) n.src = src.src
-      return n
+    /** 담아 둔 것을 `d` 만큼 밀어 이 쪽에 넣고, **넣은 것을 고른 채로** 둔다(붙이기 · 복제 공용).
+     *  상자와 선을 한 번에 넣는다 — 하나씩 넣으면 선 없는 중간 모습이 화면에 지나간다.
+     *  담긴 것이 없으면(안 보이는 상자만 걸려들었을 때) 기억도 하지 않는다 — 빈 ⌘Z 걸음이 남는다.
+     *  **그림은 어디에 붙이든 같다.** 붙이는 쪽이 머메이드(트리) 쪽일 때만 흐린 상자의 「다시 놓은 부모」
+     *  표시를 살려 둔다 — 화면(FreeLayer · RightPanel)과 같은 판정(`isTreePage`)으로 가른다. */
+    function putParts(page: Page, clip: Clip, d: number) {
+      if (!clip.els.length) return
+      snap(page)
+      const out = pasteParts(clip, page.els.map((e) => e.id), nextElId, d, d, isTreePage(page))
+      useBuilder.getState().setCanvas(page.id, { els: [...page.els, ...out.els], conns: [...page.conns, ...out.conns], strokes: page.strokes })
+      useCanvasUI.getState().setSelMany(out.els.map((e) => e.id))
     }
 
     function onKey(e: KeyboardEvent) {
@@ -139,17 +154,81 @@ export default function Hotkeys(props: Props) {
 
       const sel = selectedEl()
 
+      /**
+       * **알마인드식 가지 키**(2026-10-06 · mindKeys.ts). 상자 **하나**를 고른 채 —
+       *   Space · Insert 자식 / Enter 형제 / Shift+Enter 앞 형제 → 붙이고 곧바로 글을 친다.
+       *   방향키 = 부모 · 자식 · 형제로 옮겨 가기 / Delete = 가지째 / 접기 · 펴기.
+       * 붙일 때마다 스토어가 트리를 **종이 안에** 다시 앉힌다(`treeAdd` → `layoutTree`).
+       *
+       * 손으로 놓은 일반 쪽에서도 **붙이는 키**는 듣는다 — 그 순간 그 쪽이 트리 쪽이 된다.
+       * 옮겨 가기 · 가지째 지우기 · 접기는 **트리 쪽에서만** 듣는다. 손으로 이어 둔 그림에서 Delete 한 번에
+       * 가지가 통째로 사라지거나 방향키가 1px 이동을 안 하면, 그건 고른 적 없는 동작이다.
+       * 마인드맵 카드 쪽은 건드리지 않는다(가지가 한 단뿐이고 자리 규칙이 다르다).
+       */
+      const mind = (() => {
+        if (!sel || ui.selEls.length > 1 || ui.tool !== 'select') return null
+        if (sel.page.mindmapCenter != null || sel.el.locked) return null
+        if (['text', 'icon', 'wordart', 'note', 'table', 'image'].includes(sel.el.type)) return null
+        // 초점이 단추 · 고르기 칸에 있으면 Space · Enter 는 그것을 누르는 키다.
+        const tag = target ? target.tagName : ''
+        if (tag === 'BUTTON' || tag === 'SELECT' || tag === 'A') return null
+        const id = sel.el.echoOf ?? sel.el.id          // 아래 띠에 다시 놓은 부모를 골랐으면 원본을 본다
+        const shape = treeShape(sel.page.els, sel.page.conns, knownOf(sel.page))
+        return { page: sel.page, id, shape, tree: isTreePage(sel.page) && shape.members.includes(id) }
+      })()
+      if (mind) {
+        const act = mindKey(e)
+        if (act === 'child' || act === 'sibling' || act === 'before') {
+          e.preventDefault()
+          if (e.repeat) return
+          snap(mind.page)
+          // 접힌 상자에 자식을 붙이면 붙이자마자 안 보인다 — 먼저 편다.
+          if (act === 'child' && mind.page.els.some((x) => x.id === mind.id && x.folded)) bs.treeFold(mind.page.id, mind.id)
+          const had = new Set(mind.page.els.map((x) => x.id))
+          bs.treeAdd(mind.page.id, mind.id, act)
+          const now = useBuilder.getState().pages.find((pg) => pg.id === mind.page.id)
+          const made = now ? now.els.find((x) => !had.has(x.id) && x.echoOf == null) : null
+          if (made) { ui.setSel(made.id); ui.requestEdit(made.id); ui.setReveal(made.id) }
+          return
+        }
+        if (mind.tree && (act === 'fold' || act === 'unfold' || act === 'unfoldAll')) {
+          e.preventDefault()
+          const folded = (id: number) => mind.page.els.some((x) => x.id === id && x.folded)
+          const kids = (mind.shape.kids.get(mind.id) || []).length
+          const ids = act === 'unfoldAll' ? mind.page.els.filter((x) => x.folded && x.echoOf == null).map((x) => x.id)
+            : act === 'fold' ? (kids > 0 && !folded(mind.id) ? [mind.id] : [])
+            : (folded(mind.id) ? [mind.id] : [])
+          if (ids.length) { snap(mind.page); ids.forEach((id) => bs.treeFold(mind.page.id, id)) }
+          return
+        }
+        if (mind.tree && (k === 'Delete' || k === 'Backspace')) {
+          e.preventDefault(); snap(mind.page)
+          const up = mind.shape.parent.get(mind.id)
+          bs.treeRemove(mind.page.id, mind.id)
+          ui.setSel(up ?? null)
+          return
+        }
+        // 토픽 사이 옮겨 가기. **Alt · Shift 를 누르면 건너뛴다** — 아래의 1px(Shift=10px) 이동으로 간다.
+        if (mind.tree && !mod && !e.altKey && !e.shiftKey && (k === 'ArrowUp' || k === 'ArrowDown' || k === 'ArrowLeft' || k === 'ArrowRight')) {
+          e.preventDefault()
+          const to = navTarget(mind.shape, sel!.page.treeDir || 'LR', mind.id, k)
+          if (to != null) { ui.setSel(to); ui.setReveal(to) }
+          return
+        }
+      }
+
       // 삭제
       const selMany = selectedEls()
       if ((k === 'Delete' || k === 'Backspace') && selMany) { e.preventDefault(); snap(selMany.page); selMany.els.forEach((el) => bs.removeEl(selMany.page.id, el.id)); ui.setSel(null); return }
 
-      // 복제
-      if (mod && lower === 'd' && sel) { e.preventDefault(); snap(sel.page); const n = cloneAt(sel.el, 16, 16); bs.addEl(sel.page.id, n); ui.setSel(n.id); return }
+      // 복제 — 삭제·잘라내기처럼 **고른 것 전부**가 대상이다(그 사이의 선까지).
+      if (mod && lower === 'd' && selMany) { e.preventDefault(); putParts(selMany.page, copyParts(selMany.page, selMany.els.map((el) => el.id)), 16); return }
 
       // 복사 / 잘라내기 / 붙여넣기
-      if (mod && lower === 'c' && sel) { e.preventDefault(); CLIP = { ...sel.el }; return }
-      if (mod && lower === 'x' && selMany) { e.preventDefault(); CLIP = { ...selMany.els[selMany.els.length - 1] }; snap(selMany.page); selMany.els.forEach((el) => bs.removeEl(selMany.page.id, el.id)); ui.setSel(null); return }
-      if (mod && lower === 'v' && CLIP && page) { e.preventDefault(); snap(page); const n = cloneAt(CLIP, 20, 20); bs.addEl(page.id, n); ui.setSel(n.id); return }
+      // 잘라내기는 **지우기 전에** 담는다. 전에는 마지막 하나만 담고 전부 지워서 나머지가 사라졌다.
+      if (mod && lower === 'c' && selMany) { e.preventDefault(); CLIP = copyParts(selMany.page, selMany.els.map((el) => el.id)); PASTED = 0; return }
+      if (mod && lower === 'x' && selMany) { e.preventDefault(); CLIP = copyParts(selMany.page, selMany.els.map((el) => el.id)); PASTED = 0; snap(selMany.page); selMany.els.forEach((el) => bs.removeEl(selMany.page.id, el.id)); ui.setSel(null); return }
+      if (mod && lower === 'v' && CLIP && page) { e.preventDefault(); putParts(page, CLIP, 20 * ++PASTED); return }
 
       // 앞으로/뒤로: ⌘/Ctrl + ] / [
       if (mod && (k === ']' || k === '[') && sel) { e.preventDefault(); snap(sel.page); bs.reorderEl(sel.page.id, sel.el.id, k === ']'); return }

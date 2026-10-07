@@ -9,6 +9,7 @@ import { pageSize } from './sizing'
 import type { TocItem } from '../builder/util'
 import { paperBgStyle } from './paper'
 import { pushSnap } from '../canvas/model'
+import { isComposingKey } from '../lib/ime'
 
 export interface PageViewProps {
   page: Page
@@ -95,7 +96,8 @@ function Ef({ ctx, k, ph, style }: { ctx: EfCtx; k: string; ph?: string; style?:
       contentEditable suppressContentEditableWarning
       onFocus={ctx.selectAllOnFocus}
       onPointerDown={(e) => { e.stopPropagation(); ctx.startDetachDrag(e, e.currentTarget, e.currentTarget, k, e.currentTarget.textContent || '') }}
-      onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); (e.currentTarget as HTMLElement).blur() } }}
+      // 한글 조합 중의 Enter 로는 빠져나가지 않는다 — 마지막 글자가 두 번 찍히던 것(lib/ime). 아래 둘도 같다.
+      onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !isComposingKey(e)) { e.preventDefault(); (e.currentTarget as HTMLElement).blur() } }}
       onBlur={(e) => { const t = e.currentTarget.textContent || ''; if (t !== (ctx.f[k] || '')) ctx.updateField(ctx.page.id, k, t) }}
     >{v}</span>
   )
@@ -119,7 +121,7 @@ function EfIn({ ctx, k, ph, style }: { ctx: EfCtx; k: string; ph?: string; style
     <span className="cardedit" data-ph={ph || '내용 입력'} style={style}
       contentEditable suppressContentEditableWarning
       onFocus={ctx.selectAllOnFocus}
-      onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); (e.currentTarget as HTMLElement).blur() } }}
+      onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !isComposingKey(e)) { e.preventDefault(); (e.currentTarget as HTMLElement).blur() } }}
       onBlur={(e) => { const t = e.currentTarget.textContent || ''; if (t !== (ctx.f[k] || '')) ctx.updateField(ctx.page.id, k, t) }}
     >{v}</span>
   )
@@ -137,7 +139,7 @@ function EfPair({ ctx, k, sep, lph, rph, lStyle, rStyle, noStop }: { ctx: EfCtx;
     <span className="cardedit" data-ph={ph} style={st} contentEditable suppressContentEditableWarning
       onFocus={ctx.selectAllOnFocus}
       onPointerDown={noStop ? undefined : (e) => e.stopPropagation()}
-      onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); (e.currentTarget as HTMLElement).blur() } }}
+      onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !isComposingKey(e)) { e.preventDefault(); (e.currentTarget as HTMLElement).blur() } }}
       onBlur={(e) => done(e.currentTarget.textContent || '')}>{val}</span>
   )
   return (<>{cell(lv, lph || '', lStyle, (t) => commit(t, rv))}{cell(rv, rph || '', rStyle, (t) => commit(lv, t))}</>)

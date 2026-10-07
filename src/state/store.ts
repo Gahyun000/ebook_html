@@ -3,8 +3,8 @@ import { cardByKey } from '../cards/registry'
 import { pageSize } from '../cards/sizing'
 import { mindmapParts } from '../cards/mindmapEls'
 import { parseMermaid } from '../cards/mermaid'
-import { treeParts } from '../cards/treeEls'
-import { treeShape, layoutTree, newNode, TREE_CONN } from '../cards/treeOps'
+import { treeParts, NODE_W, NODE_H } from '../cards/treeEls'
+import { treeShape, layoutTree, newNode, TREE_CONN, isTreePage } from '../cards/treeOps'
 import type { ImportedDoc } from '../import/htmlImport'
 import { polish } from '../builder/polish'
 import { dropHistory, popDocRedo, popDocSnap, pushDocRedo, pushDocSnap, pushDocUndoRaw } from '../canvas/history'
@@ -89,7 +89,10 @@ export interface BuilderState {
   /** 트리에 상자 하나를 붙인다.
    *  `kind`: 자식 · 형제 · 새 뿌리. **뿌리를 골라 「형제」를 부르면 새 뿌리가 된다** —
    *  단추 글자도 그때 「＋ 새 뿌리」로 바뀐다(RightPanel). 붙인 뒤 트리를 다시 앉힌다. */
-  treeAdd: (pageId: number, elId: number | null, kind: 'child' | 'sibling' | 'root') => void
+  treeAdd: (pageId: number, elId: number | null, kind: 'child' | 'sibling' | 'before' | 'root') => void
+  /** 상자를 **그 아래 가지째** 지우고 트리를 다시 앉힌다(알마인드 Delete).
+   *  `removeEl` 은 상자 하나와 거기 걸린 선만 지워서, 자손이 선 없는 외톨이 뿌리로 남는다. */
+  treeRemove: (pageId: number, elId: number) => void
   /** 가지를 접거나 편다. 접힘은 `folded`, 안 보임은 매번 다시 계산한다. */
   treeFold: (pageId: number, elId: number) => void
   updateConn: (pageId: number, index: number, bend: { x: number; y: number }) => void
@@ -122,6 +125,30 @@ let uid = 1
 let elUid = 100000
 // 자유 캔버스 요소 id 단일 발급원(mkFreeEl 포함 모두 여기서). reseedUids가 로드 때 이 카운터를 끌어올림.
 export function nextElId(): number { return elUid++ }
+/**
+ * **번호표를 이미 쓴 번호 위로 올린다**(2026-10-06).
+ *
+ * 트리를 다시 앉힐 때 생기는 echo(아래 띠 머리에 다시 놓은 부모)는 번호표를 안 뽑고 `가장 큰 id + 1` 로
+ * 번호를 받는다(treeOps.layoutTree — 순수 함수라 번호표를 모른다). 번호표가 그대로면 다음에 뽑는 번호가
+ * **echo 와 같아진다.** 「＋ 자식」 이 그 번호를 받으면 layoutTree 가 그 상자로 가는 선을 「echo 로 들어가는 선」
+ * 으로 읽고 버려서, 새 상자가 **선 없이 왼쪽 위에 뿌리와 포개졌다**(2026-10-02 화면에서 재현).
+ * 그래서 트리를 앉힌 뒤에는 늘 이걸 부른다.
+ */
+/**
+ * 트리를 앉히되, **이 종이에 안 들어가 포개지면 더 큰 슬라이드에 앉힌다**(2026-10-06).
+ *
+ * `layoutTree` 는 종이가 모자라면 아래 띠로 접는데, 위 띠의 줄이 많으면 아래 띠가 그 위에 포개진다
+ * (가로 종이에서 자식 다섯 + 넷째 단 — 화면 기록 오후 5.10.16). 슬라이드는 넘치면 같은 비율로 늘어나므로
+ * (workArea.growOf), 포개는 대신 종이를 그 비율로 키워 가며 **안 겹칠 때까지** 다시 앉힌다.
+ * 이북에는 늘어난 슬라이드를 줄여 담는다. 키로 붙이고 지우고 접는 길에서만 쓴다 — 카드로 처음 펼칠 때는
+ * 고르는 화면이 「넘칩니다」 로 미리 말하므로 예전 그대로다.
+ */
+function seatTree(els: FreeEl[], conns: Conn[], W: number, H: number, want: 'LR' | 'TD', known: number[]) {
+  let laid = layoutTree(els, conns, W, H, want, known)
+  for (let f = 1.25; laid.overlapping > 0 && f <= 6; f += 0.25) laid = layoutTree(els, conns, W * f, H * f, want, known)
+  return laid
+}
+function claimIds(els: FreeEl[]): void { for (const e of els) if (e && e.id >= elUid) elUid = e.id + 1 }
 // 새 페이지의 필드는 빈칸으로 시작한다.
 // registry 의 example 을 그대로 넣으면 같은 카드를 두 번 추가했을 때 글자까지 똑같은 페이지가 나오고,
 // 지우지 않은 예시 문구가 그대로 내보내기까지 따라간다.
@@ -242,6 +269,7 @@ export const useBuilder = create<BuilderState>((set, get) => ({
       // 넣으면 눕히거나 간격을 줄여 버틴다. 같은 종이 아래 띠로 이어 그리는 편이 읽기 쉽다.
       // **쓴 방향을 준다**(`dir`) — 사람이 쓴 방향이 우선이고, 실제로 앉힌 방향을 적는다.
       const laid = layoutTree(els, conns, W, H, dir, rs)
+      claimIds(laid.els)
       const tp: Page = { id: uid++, cardKey: 'slide', fields: {}, free: true,
                          els: laid.els, conns: laid.conns, strokes: [], blocks: [], bg: '',
                          treeRoot: rootId, treeRoots: rs,
@@ -362,7 +390,10 @@ export const useBuilder = create<BuilderState>((set, get) => ({
       const shape = treeShape(p.els, p.conns, known)
       const id = nextElId()
       const roots = known.slice()
-      const els = [...p.els, newNode(id, kind === 'root' ? '새 뿌리' : '새 상자')]
+      // **손으로 놓은 상자에서도 시작한다**(2026-10-06 알마인드 키). 선이 하나도 없는 상자는 명단에 적어야
+      // 트리에 남는다 — 안 적으면 「형제」 를 붙였을 때 고른 상자만 제자리에 남아 새 뿌리와 포개진다.
+      if (elId != null && !shape.members.includes(elId) && p.els.some((e) => e.id === elId)) roots.push(elId)
+      let els = [...p.els, newNode(id, kind === 'root' ? '새 뿌리' : '새 상자')]
       const conns = p.conns.slice()
       // 뿌리의 「형제」는 **또 하나의 뿌리**다. 부모가 없으니 이을 데가 없다.
       const parent = kind === 'root' ? null
@@ -370,18 +401,47 @@ export const useBuilder = create<BuilderState>((set, get) => ({
         : (elId != null ? (shape.parent.get(elId) ?? null) : null)
       if (parent == null) {
         roots.push(id)
-      } else if (kind === 'sibling' && elId != null) {
+      } else if ((kind === 'sibling' || kind === 'before') && elId != null) {
         // 고른 상자 **바로 뒤**에 끼운다 — 줄 순서는 선 순서를 따르므로 맨 뒤에 붙이면
         // 새 상자가 형제들 맨 아래로 간다. 사람이 기대하는 자리는 고른 것 바로 밑이다.
+        // 「앞 형제」(before)는 같은 자리의 **앞**에 끼운다.
         const at = conns.findIndex((c) => c && c.to === elId)
         const nc = { from: parent, to: id, ...TREE_CONN }
-        if (at >= 0) conns.splice(at + 1, 0, nc); else conns.push(nc)
+        if (at >= 0) conns.splice(kind === 'before' ? at : at + 1, 0, nc); else conns.push(nc)
       } else {
         conns.push({ from: parent, to: id, ...TREE_CONN })
       }
-      const laid = layoutTree(els, conns, W, H, p.treeDir || 'LR', roots)
+      // **처음 트리로 들어오는 쪽**은 상자 크기를 트리 상자에 맞춘다. 줄 · 칸 간격이 그 크기에 맞춘 값이라,
+      // 손으로 키워 둔 상자를 그대로 두면 아래 줄과 붙거나 겹친다. 이미 트리인 쪽은 건드리지 않는다.
+      if (!isTreePage(p)) {
+        const mine = new Set(treeShape(els, conns, roots).members)
+        els = els.map((e) => (mine.has(e.id) && (e.w !== NODE_W || e.h !== NODE_H) ? { ...e, w: NODE_W, h: NODE_H } : e))
+      }
+      const laid = seatTree(els, conns, W, H, p.treeDir || 'LR', roots)
+      claimIds(laid.els)
+      // 명단이 비어 있으면(손으로 이은 쪽에서 처음 붙였다) 지금의 뿌리를 적는다 — 그래야 이 쪽이
+      // 트리 쪽으로 읽혀(`isTreePage`) 접기 손잡이와 패널 단추가 따라 나온다.
+      const marked = roots.length ? roots : treeShape(laid.els, laid.conns).roots
       return { ...p, els: laid.els, conns: laid.conns, treeDir: laid.dir,
-               treeRoots: roots, treeRoot: roots[0] ?? p.treeRoot }
+               treeRoots: marked, treeRoot: marked[0] ?? p.treeRoot }
+    }) }
+  }),
+  treeRemove: (pageId, elId) => set((s) => {
+    const { W, H } = pageSize(s.orientation)
+    return { pages: mapPage(s.pages, pageId, (p) => {
+      const known = p.treeRoots || (p.treeRoot != null ? [p.treeRoot] : [])
+      const shape = treeShape(p.els, p.conns, known)
+      const gone = new Set<number>()
+      const walk = (id: number) => { if (gone.has(id)) return; gone.add(id); (shape.kids.get(id) || []).forEach(walk) }
+      walk(elId)
+      // 지워지는 상자를 아래 띠에 다시 놓은 것(echo)도 같이 걷는다 — 선이 그리로 걸려 있다.
+      for (const e of p.els) if (e.echoOf != null && gone.has(e.echoOf)) gone.add(e.id)
+      const els = p.els.filter((e) => !gone.has(e.id))
+      const conns = p.conns.filter((c) => !gone.has(c.from) && !gone.has(c.to))
+      const roots = known.filter((id) => !gone.has(id))
+      const laid = seatTree(els, conns, W, H, p.treeDir || 'LR', roots)
+      claimIds(laid.els)
+      return { ...p, els: laid.els, conns: laid.conns, treeDir: laid.dir, treeRoots: roots, treeRoot: roots[0] }
     }) }
   }),
   treeFold: (pageId, elId) => set((s) => {
@@ -389,7 +449,8 @@ export const useBuilder = create<BuilderState>((set, get) => ({
     return { pages: mapPage(s.pages, pageId, (p) => {
       const known = p.treeRoots || (p.treeRoot != null ? [p.treeRoot] : [])
       const els = p.els.map((e) => (e.id === elId ? { ...e, folded: !e.folded } : e))
-      const laid = layoutTree(els, p.conns, W, H, p.treeDir || 'LR', known)
+      const laid = seatTree(els, p.conns, W, H, p.treeDir || 'LR', known)
+      claimIds(laid.els)
       return { ...p, els: laid.els, conns: laid.conns, treeDir: laid.dir }
     }) }
   }),

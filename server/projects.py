@@ -1,6 +1,6 @@
 """프로젝트(이북) 영구 저장 — SQLite 백엔드.
 
-'내 이북' 목록의 진실 소스. 편집용 작업본(state=DraftStateSnapshot JSON)을
+'EVER-SKETCH' 목록의 진실 소스. 편집용 작업본(state=DraftStateSnapshot JSON)을
 프로젝트마다 개별 저장한다. 재시작 후에도 남는다.
 - Projects        : 편집 프로젝트(작업본)
 - ProjectVersions : 프로젝트별 버전 기록(자동/이름/고정)

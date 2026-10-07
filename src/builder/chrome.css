@@ -34,7 +34,6 @@
 .ax-title .rbtn{border:1px solid var(--ax-line);background:var(--ax-surface);border-radius:8px;padding:7px 13px;font-size:13px;font-weight:600;cursor:pointer;color:var(--ax-ink);white-space:nowrap;flex:0 0 auto}
 .ax-title .rbtn:hover{background:var(--ax-plane)}
 .ax-title .rbtn.pri{background:var(--ax-blue);color:#fff;border-color:var(--ax-blue)}
-.ax-title .av{width:30px;height:30px;flex:0 0 auto;border-radius:50%;background:#1b7a3d;color:#fff;display:grid;place-items:center;font-weight:700;font-size:13px}
 
 /* 메뉴줄 */
 .ax-menu{display:flex;align-items:center;gap:2px;background:var(--ax-surface);padding:2px 14px 6px;border-bottom:1px solid var(--ax-line);font-size:13.5px;flex:0 0 auto;flex-wrap:wrap}
@@ -179,11 +178,13 @@
   font-weight:800;letter-spacing:.06em;line-height:1}
 .ax-edge.named:hover{background:var(--ax-blue-100)}
 .ax-edge:hover{color:var(--ax-blue);border-color:var(--ax-blue)}
-/* 가운데 두기는 justify-content:center 가 아니라 **자식의 auto 여백**으로 한다.
-   화면 배율이 100% 를 넘어 종이가 작업창보다 커지면 center 는 종이 왼쪽을 음수 쪽으로 밀어내
-   스크롤로도 못 가는 자리를 만든다. auto 여백은 모자랄 때 0 이 되어 왼쪽 끝부터 스크롤된다. */
-.ax-stage-wrap .stage{flex:1 1 auto;min-height:0;overflow:auto;display:flex;align-items:flex-start;justify-content:flex-start;padding:16px}
-.ax-stage-wrap .stage > *{margin-left:auto;margin-right:auto}
+/* **창 전체가 슬라이드다**(2026-10-06). 테두리 · 뒷바탕 없음 — 바탕색(그 쪽의 색) · 슬라이드 자리 · 굴릴 넓이 ·
+   막대(축마다 scroll/hidden)는 Preview 가 workArea 규칙으로 직접 준다. overflow:auto 에 맡기면 가로 막대가 세로 막대를 부른다. */
+.ax-stage-wrap .stage{flex:1 1 auto;min-height:0;display:block;padding:0;background:#fff;border-radius:0}
+.ax-stage-wrap .stage .pv-ext{position:relative}
+.ax-stage-wrap .stage .pv-paper{position:absolute}
+.ax-stage-wrap .stage .pv-empty{height:100%;display:flex;align-items:center;justify-content:center}
+.pv-out{color:#b4541a}
 .ax-panelcol{display:grid;grid-template-columns:1fr 52px;background:var(--ax-surface);border-left:1px solid var(--ax-line);min-height:0}
 .ax-panel{overflow:auto;padding:14px 14px 20px;border-right:1px solid var(--ax-line)}
 .ax-panel h4{font-size:12px;font-weight:800;color:var(--ax-muted);letter-spacing:.02em;margin:14px 0 8px}
@@ -384,10 +385,29 @@
 .insp-sw{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
 .insp-chip{width:22px;height:22px;border-radius:6px;border:1px solid rgba(0,0,0,.12);cursor:pointer}
 .insp-chip.on{outline:2px solid var(--ax-blue);outline-offset:1px}
-.insp-row.seg{display:inline-flex;border:1px solid var(--ax-line);border-radius:8px;overflow:hidden;gap:0}
-.insp-row.seg button{border:0;background:#fff;padding:7px 12px;font-size:12.5px;color:var(--ax-ink);cursor:pointer;border-right:1px solid var(--ax-line)}
-.insp-row.seg button:last-child{border-right:0}
-.insp-row.seg button.on{background:var(--ax-blue-100);color:var(--ax-blue-d)}
+/* **고른 것은 테두리로 가른다**(EVER-SKETCH1 0398eb3 · 2026-09-14).
+ *
+ * 예전에는 한 테두리 안에 단추를 붙여 놓고 **고른 것에만 연한 파랑을 칠했다.**
+ * 그러면 안 고른 것이 **흰 알약**으로 남는데, 아이폰·맥 분절 단추가 전부
+ * 「흰 알약 = 고른 것」이라 사람이 **정확히 반대로** 읽는다.
+ * 실제로 「가로/세로가 반대로 움직이는 것 같다」는 말을 들었다 —
+ * 동작은 처음부터 맞았고, 표시만 거꾸로였다.
+ *
+ * 그래서 바로 옆 「전환」이 쓰던 방식(`.insp-pill.on`)으로 맞춘다:
+ * 떨어진 알약 + **고른 것에 파란 테두리**. 이 화면에 이미 있던 규칙이라
+ * 새로 외울 것이 없고, 여섯 군데(방향·배경·글자 정렬 둘·연결선 종류·화살촉)가
+ * **한꺼번에** 같은 말을 하게 된다.
+ *
+ * (ebook_html · 2026-10-02) **받침도 걷는다**(`background` · `padding`). 옛 머리줄의 `.seg`
+ * (index.css — 회색 받침 + 안여백 3px)가 같은 이름을 쓰는 이 묶음에도 걸려서, 테두리를 걷고도
+ * 흰 단추가 회색 받침 위에 올라앉은 알약으로 보였다 — 화면을 찍어 보고 알았다. */
+.insp-row.seg{display:inline-flex;border:0;border-radius:0;overflow:visible;gap:5px;background:transparent;padding:0}
+.insp-row.seg button{border:1px solid var(--ax-line);background:#fff;border-radius:8px;
+  padding:6px 11px;font-size:12.5px;color:var(--ax-ink);cursor:pointer}
+.insp-row.seg button:hover{background:var(--ax-plane)}
+.insp-row.seg button.on{background:var(--ax-blue-100);border-color:var(--ax-blue);
+  color:var(--ax-blue-d);font-weight:800;box-shadow:0 0 0 1px var(--ax-blue) inset}
+.insp-row.seg button.on:hover{background:var(--ax-blue-100)}
 .ax-editwrap{margin-top:6px}
 .insp-preset{width:34px;height:26px;border-radius:7px;border:1px solid rgba(0,0,0,.12);display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;cursor:pointer}
 .insp-preset:hover{outline:2px solid var(--ax-blue);outline-offset:1px}

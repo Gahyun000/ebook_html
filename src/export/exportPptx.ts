@@ -3,6 +3,7 @@ import type { Page, FreeEl } from '../state/store'
 import { saveWithPicker } from './exportFiles'
 import { coveredSet, mergeCovering, trackSizes } from '../canvas/tableOps'
 import { cellBackground, cellTextColor } from '../canvas/cellColor'
+import { growOf } from '../builder/workArea'
 
 const PXIN = 96  // px per inch(기준)
 
@@ -127,13 +128,17 @@ export async function exportPptx(pages: Page[], opts: { title: string; W: number
       })
     }
 
+    // **넘쳐서 늘어난 슬라이드는 줄여 담는다**(workArea.growOf · 화면의 PageWithCanvas 와 같은 배율).
+    // 카드 글자 · 그림은 위에서 화면(DOM)을 재어 넣었으니 그대로고, 자유 요소 · 선만 1/k 이다.
+    const k = growOf(p.els, p.strokes, opts.W, opts.H, true)
+    const fx = sx / k, fy = sy / k
     // ── 연결선(자유요소 사이) ──
     for (const c of p.conns) {
       const a = p.els.find((e) => e.id === c.from), b = p.els.find((e) => e.id === c.to)
       if (!a || !b) continue
       const s = edge(a, b.x + b.w / 2, b.y + b.h / 2), t = edge(b, a.x + a.w / 2, a.y + a.h / 2)
-      const x1 = s.x * sx, y1 = s.y * sy, x2 = t.x * sx, y2 = t.y * sy
-      const line: any = { color: rgbToHex(c.color) || '8B93A5', width: c.width || 1.5 }
+      const x1 = s.x * fx, y1 = s.y * fy, x2 = t.x * fx, y2 = t.y * fy
+      const line: any = { color: rgbToHex(c.color) || '8B93A5', width: (c.width || 1.5) / k }
       if (c.dash) line.dashType = 'dash'
       const arrow = c.arrow || 'end'
       if (arrow !== 'none') line.endArrowType = 'triangle'
@@ -143,7 +148,7 @@ export async function exportPptx(pages: Page[], opts: { title: string; W: number
 
     // ── 자유요소(모델 기반) ──
     for (const el of p.els) {
-      const box = { x: el.x * sx, y: el.y * sy, w: Math.max(0.05, el.w * sx), h: Math.max(0.05, el.h * sy) }
+      const box = { x: el.x * fx, y: el.y * fy, w: Math.max(0.05, el.w * fx), h: Math.max(0.05, el.h * fy) }
       const common: any = {}
       if (el.rot) common.rotate = Math.round(el.rot)
       if (el.flipH) common.flipH = true
@@ -162,7 +167,7 @@ export async function exportPptx(pages: Page[], opts: { title: string; W: number
             const m = mergeCovering(el.merges, r, c)
             const o: any = { align: (el.calign && el.calign[r + '_' + c]) || 'left', valign: (el.cvalign && el.cvalign[r + '_' + c]) || 'middle' }
             const cf = el.cfs && el.cfs[r + '_' + c]
-            if (cf) o.fontSize = Math.max(6, cf * 0.72)   // 표 전체 fontSize 를 셀 단위로 덮어쓴다
+            if (cf) o.fontSize = Math.max(6, cf * 0.72 / k)   // 표 전체 fontSize 를 셀 단위로 덮어쓴다
             if (m) { o.colspan = m.cs; o.rowspan = m.rs }
             // ── 칸 색 (EVER-SKETCH1 5c0e409) ──
             //
@@ -195,16 +200,16 @@ export async function exportPptx(pages: Page[], opts: { title: string; W: number
         const rowH = rh.map((v) => (box.h * v) / sr)
         // 테두리 선 모양. 파워포인트 표는 실선·파선·없음 셋뿐이라 점선도 파선으로 간다.
         const bt = (el.borderWidth === 0) ? 'none' : (el.borderDash && el.borderDash !== 'solid') ? 'dash' : 'solid'
-        if (rows.length) slide.addTable(rows, { ...box, colW, rowH, fontSize: Math.max(6, (el.fs || 12) * 0.72), border: { type: bt, color: rgbToHex(el.borderColor) || 'CFD5E2', pt: el.borderWidth || 0.5 }, autoPage: false } as any)
+        if (rows.length) slide.addTable(rows, { ...box, colW, rowH, fontSize: Math.max(6, (el.fs || 12) * 0.72 / k), border: { type: bt, color: rgbToHex(el.borderColor) || 'CFD5E2', pt: el.borderWidth || 0.5 }, autoPage: false } as any)
         continue
       }
       if (el.type === 'note') {
         const txt = (el.blocks || []).map((b) => b.text).filter(Boolean).join('\n')
-        slide.addText(txt || ' ', { ...box, ...common, fontSize: Math.max(6, (el.fs || 13) * 0.72), color: '2A3346', align: 'left', valign: 'top', margin: 3, fill: { color: 'FFFFFF' }, line: { color: 'E2E6EE', width: 1 } } as any)
+        slide.addText(txt || ' ', { ...box, ...common, fontSize: Math.max(6, (el.fs || 13) * 0.72 / k), color: '2A3346', align: 'left', valign: 'top', margin: 3, fill: { color: 'FFFFFF' }, line: { color: 'E2E6EE', width: 1 } } as any)
         continue
       }
       if (el.type === 'text' || el.type === 'wordart' || el.type === 'icon') {
-        const t: any = { ...box, ...common, fontSize: Math.max(6, (el.fs || 14) * 0.72), color: rgbToHex(el.tcolor) || '1A1A1A', bold: !!el.bold || el.type === 'wordart', italic: !!el.italic, align: el.align || (el.type === 'icon' ? 'center' : 'left'), valign: 'middle', margin: 1 }
+        const t: any = { ...box, ...common, fontSize: Math.max(6, (el.fs || 14) * 0.72 / k), color: rgbToHex(el.tcolor) || '1A1A1A', bold: !!el.bold || el.type === 'wordart', italic: !!el.italic, align: el.align || (el.type === 'icon' ? 'center' : 'left'), valign: 'middle', margin: 1 }
         if (el.underline) t.underline = { style: 'sng' }
         slide.addText(el.text || ' ', t)
         continue
@@ -212,7 +217,7 @@ export async function exportPptx(pages: Page[], opts: { title: string; W: number
       // 도형
       const st = ST[SHAPE[el.type] || 'rect'] || ST.rect
       const fill = rgbToHex(el.color)
-      const opts: any = { ...box, ...common, shape: st, align: el.align || 'center', valign: 'middle', fontSize: Math.max(6, (el.fs || 12) * 0.72), color: rgbToHex(el.tcolor) || '333333', bold: !!el.bold }
+      const opts: any = { ...box, ...common, shape: st, align: el.align || 'center', valign: 'middle', fontSize: Math.max(6, (el.fs || 12) * 0.72 / k), color: rgbToHex(el.tcolor) || '333333', bold: !!el.bold }
       opts.fill = fill ? { color: fill } : { type: 'none' }
       // 반투명. 화면은 0~1, 파워포인트는 「몇 % 비침」이라 뒤집어 넣는다.
       if (el.opacity != null && el.opacity < 1 && opts.fill.color) {

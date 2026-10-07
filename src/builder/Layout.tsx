@@ -32,6 +32,16 @@ import ConfirmSaveModal from '../persistence/ConfirmSaveModal'
 import type { ConfirmSaveRequest } from '../persistence/ConfirmSaveModal'
 import Modal from '../ui/Modal'
 
+/**
+ * **쪽 목록 폭은 종이 방향을 따른다**(2026-10-06).
+ *
+ * 사용자: 「왼쪽 폭이 세로기준이라 가로슬라이드는 살짝 잘리는거」 — 그리고 경계를 끌어 「이 정도 폭」 을 보여 줬다.
+ * 한 줄에 드는 것은 목록 여백 10 · 줄 여백 3 · 번호 14 · 사이 8 · 그림 · 끝 여백 10 · 늘 보이는 스크롤 막대 15 ·
+ * 경계선 1 = **그림 + 61**. 세로 그림(150)은 212 에 들어가지만, 가로 그림(168)은 229 가 있어야 한다.
+ * 가로는 사용자가 끌어 보인 232 로 둔다. 숫자는 Filmstrip 의 그림 폭 · chrome.css 와 함께 움직인다(film_width.test.mjs).
+ */
+const FILM_W = { portrait: 212, landscape: 232 } as const
+
 export default function Layout() {
   useCanvasCommands()
   const [help, setHelp] = useState(false)
@@ -39,7 +49,13 @@ export default function Layout() {
   const [tutorial, setTutorial] = useState(false)
   const [tutorialPlay, setTutorialPlay] = useState(false)
   const [settings, setSettings] = useState(false)
-  const [chat, setChat] = useState(false)
+  /**
+   * **오른쪽 곁자리에 무엇을 띄울까** — 하나만 고른다(EVER-SKETCH1 fb61df4 · 시안 ㄷ).
+   *
+   * 전에는 챗봇과 메모장이 각자 열림 상태를 들고 각자 단추를 띄웠다. 둘이 동시에
+   * 뜨면 안 되는데 각자 들고 있으면 언젠가 겹친다. 그래서 여기 한 곳에 둔다.
+   */
+  const [side, setSide] = useState<null | 'chat' | 'notes'>(null)
   const [demo, setDemo] = useState(false)
   const [ai, setAi] = useState(false)
   const [confirmSave, setConfirmSave] = useState<ConfirmSaveRequest | null>(null)
@@ -56,7 +72,9 @@ export default function Layout() {
     })
   }
   const orientation = useBuilder((s) => s.orientation)
-  const [leftW, setLeftW] = useState(212)
+  const [leftW, setLeftW] = useState<number>(FILM_W[orientation])
+  // 사람이 경계를 끌어 폭을 정했는가 — 정했으면 방향이 바뀌어도 그 폭을 그대로 둔다(아래 touched 와 같은 생각).
+  const leftDragged = useRef(false)
   const [rightW, setRightW] = useState(336)
   const [leftOpen, setLeftOpen] = useState(true)
   const [rightOpen, setRightOpen] = useState(true)
@@ -71,7 +89,7 @@ export default function Layout() {
       const sx = e.clientX, sw = side === 'left' ? leftW : rightW
       const move = (ev: PointerEvent) => {
         const dx = ev.clientX - sx
-        if (side === 'left') setLeftW(Math.max(150, Math.min(380, sw + dx)))
+        if (side === 'left') { leftDragged.current = true; setLeftW(Math.max(150, Math.min(380, sw + dx))) }
         else setRightW(Math.max(240, Math.min(560, sw - dx)))
       }
       const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); document.body.style.cursor = '' }
@@ -98,6 +116,14 @@ export default function Layout() {
     return () => { window.removeEventListener('ebook:present', h); window.removeEventListener('ebook:import', imp) }
   }, [saveNow])
 
+  // 오른쪽 「내용」 의 「메모장에서 글 고치기」(2026-10-06) — 곁자리에 메모장을 띄운다.
+  // 메모장은 같은 사건을 듣고 「지금 슬라이드」 보기로 간다(NotesPanel).
+  useEffect(() => {
+    const notes = () => setSide('notes')
+    window.addEventListener('ebook:notes-slide', notes)
+    return () => window.removeEventListener('ebook:notes-slide', notes)
+  }, [])
+
   useEffect(() => {
     const clamp = () => {
       const w = window.innerWidth
@@ -107,6 +133,10 @@ export default function Layout() {
     clamp(); window.addEventListener('resize', clamp)
     return () => window.removeEventListener('resize', clamp)
   }, [])
+
+  // 방향이 바뀌면(이북을 열 때 가로로 바뀌는 것도) 쪽 목록 폭을 그 방향의 폭으로 — 끌어 정한 폭이 없을 때만.
+  // 창이 좁을 때의 규칙(창 폭의 28%까지)은 위 clamp 와 같게 지킨다.
+  useEffect(() => { if (!leftDragged.current) setLeftW(Math.min(FILM_W[orientation], Math.max(150, Math.round(window.innerWidth * 0.28)))) }, [orientation])
 
   // **창이 좁아지면 곁의 패널을 접어 종이에게 자리를 내준다.**
   //
@@ -148,7 +178,7 @@ export default function Layout() {
       onCloseHelp={() => setHelp(false)} onCloseTutorial={() => setTutorial(false)}
     />
     <TitleBar onPresent={() => setPresent(true)} />
-    <MenuBar onHelp={() => setHelp(true)} onTutorial={() => setTutorialPlay(true)} onSettings={() => setSettings(true)} onImport={() => withSaveGuard(() => classicRef.current?.openImport(), '새 HTML을 불러오면 현재 작업 화면이 바뀔 수 있습니다.')} onPresent={() => setPresent(true)} />
+    <MenuBar onHelp={() => setHelp(true)} onTutorial={() => setTutorialPlay(true)} onNotes={() => setSide('notes')} onSettings={() => setSettings(true)} onImport={() => withSaveGuard(() => classicRef.current?.openImport(), '새 HTML을 불러오면 현재 작업 화면이 바뀔 수 있습니다.')} onPresent={() => setPresent(true)} />
     <EditToolbar />
     <ClassicBar ref={classicRef} onSettings={() => setSettings(true)} onDemo={() => withSaveGuard(() => setDemo(true), '데모 실행 중 현재 작업 화면이 임시로 바뀔 수 있습니다.')} onAiCleanup={() => setAi(true)} />
 
@@ -189,9 +219,11 @@ export default function Layout() {
         <SettingsPage />
       </Modal>
     ) : null}
-    {!chat ? <button className="chat-fab" onClick={() => setChat(true)}>💬 챗봇</button> : null}
-    <ChatPanel isOpen={chat} onClose={() => setChat(false)} screenContext={{ page: 'builder' }} onUiAction={applyUiAction} />
-    <NotesPanel />
+    {/* 떠 있는 단추는 **하나뿐**이다. 메모장으로 가는 길은 이 안의 탭과 도구 메뉴다. */}
+    {!side ? <button className="chat-fab" onClick={() => setSide('chat')}>💬 챗봇</button> : null}
+    <ChatPanel isOpen={side === 'chat'} onClose={() => setSide(null)} onNotes={() => setSide('notes')}
+      screenContext={{ page: 'builder' }} onUiAction={applyUiAction} />
+    <NotesPanel open={side === 'notes'} onClose={() => setSide(null)} onChat={() => setSide('chat')} />
     <DemoPlayer open={demo} onClose={() => setDemo(false)} />
     <InsertPicker />
     <AiCleanup open={ai} onClose={() => setAi(false)} />

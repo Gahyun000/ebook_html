@@ -1,4 +1,4 @@
-// 프로젝트(내 이북) + 버전 서버 API 클라이언트. IndexedDB를 대체하는 단일 진실 소스.
+// 프로젝트(EVER-SKETCH) + 버전 서버 API 클라이언트. IndexedDB를 대체하는 단일 진실 소스.
 import type { DraftStateSnapshot } from './draftStorage'
 
 const API = '/api'

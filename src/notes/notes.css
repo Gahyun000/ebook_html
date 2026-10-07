@@ -1,9 +1,15 @@
-/* 메모장 패널 — 챗봇식 왼쪽 슬라이드 패널 */
-.np-fab{position:fixed;left:16px;bottom:16px;z-index:60;display:inline-flex;align-items:center;gap:6px;background:#fff;border:1px solid #e2e6ee;border-radius:9999px;box-shadow:0 8px 22px rgba(20,25,40,.16);padding:9px 14px;font-size:13px;font-weight:800;color:#3a4150;cursor:pointer}
-.np-fab:hover{border-color:#c9d3e6}
-.np-fab-dot{width:7px;height:7px;border-radius:50%;background:#2462EB;display:inline-block}
-
-.np-panel{position:fixed;top:0;left:0;bottom:0;z-index:61;background:#fff;border-right:1px solid #e2e6ee;box-shadow:6px 0 26px rgba(20,25,40,.12);display:flex;flex-direction:column}
+/* 메모장 패널 — **챗봇과 같은 오른쪽 카드**(EVER-SKETCH1 fb61df4 · 2026-09-18 · 시안 ㄷ).
+ *
+ * 전에는 왼쪽에 꽉 찬 기둥(left:0 · 위아래 끝까지)이었고, 왼쪽 아래에 제 단추가
+ * 따로 떠 있었다. 이제 챗봇과 한 자리를 나눠 쓰므로 생김새도 그쪽을 따른다.
+ * 왼쪽 가장자리에는 쪽 목록과 그 접기 손잡이가 이미 있어서 오른쪽이 덜 붐빈다.
+ *
+ * 떠 있던 `.np-fab` 은 없앴다. 메모장으로 가는 길은 **패널 안의 탭**과
+ * **도구 ▸ 메모장** 둘이다. 파란 점(적어 둔 게 있다)은 탭으로 옮겼다(.side-dot).
+ *
+ * 자리·모서리·그림자는 `.chat-panel` 과 같은 값이다. 둘이 같은 자리에서 갈아드는데
+ * 값이 어긋나면 탭을 누를 때마다 패널이 **덜컥 움직인다.** */
+.np-panel{position:fixed;top:12px;right:12px;bottom:12px;z-index:40;background:#fff;border:1px solid #e2e6ee;border-radius:16px;overflow:hidden;box-shadow:0 18px 50px rgba(10,12,20,.20);display:flex;flex-direction:column}
 .np-head{display:flex;align-items:center;gap:7px;padding:10px 12px;border-bottom:1px solid #eef1f6;color:#242a36}
 .np-head b{font-size:14px}
 .np-sizes{margin-left:auto;display:inline-flex;gap:2px}
@@ -19,6 +25,18 @@
 .np-toolbar select{border:1px solid #e2e6ee;border-radius:8px;font-size:12px;padding:0 6px;color:#3a4150;background:#fff}
 .np-new{margin:2px 11px 6px;display:inline-flex;align-items:center;justify-content:center;gap:6px;border:1px dashed #c9d3e6;background:#f7f9fc;border-radius:9px;padding:8px;font-size:13px;font-weight:700;color:#2462EB;cursor:pointer}
 .np-new:hover{border-color:#2462EB;background:#eef4ff}
+
+/* 「지금 슬라이드」(2026-10-06) — 메모가 아니라 **지금 고른 빈 페이지의 글**로 가는 줄.
+   메모와 섞여 읽히지 않게 옅은 파랑 테두리로 가른다(이 패널의 파랑 · #2462EB 계열 그대로). */
+.np-slide{margin:9px 11px 2px;display:flex;align-items:center;gap:8px;text-align:left;font:inherit;border:1px solid #c9d8ff;background:#f5f8ff;border-radius:10px;padding:9px 10px;cursor:pointer}
+.np-slide:hover{border-color:#2462EB;background:#eef4ff}
+.np-slide:focus-visible{outline:2px solid #2462EB;outline-offset:2px}
+.np-slide-lab{font-size:11px;font-weight:800;color:#2462EB;white-space:nowrap}
+.np-slide-prev{flex:1;min-width:0;font-size:12.5px;font-weight:700;color:#242a36;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.np-slide-go{flex:none;color:#2462EB}
+.np-slide-head{flex:1;min-width:0;font-size:14px;font-weight:800;color:#242a36;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.np-slide-cap{padding:0 12px 6px;font-size:11.5px;color:#8a93a5}
+.np-slide-ed{flex:1;min-height:0;overflow:auto;padding:4px 12px 18px}
 
 .np-list{flex:1;min-height:0;overflow:auto;padding:0 8px 12px}
 .np-empty{padding:24px 12px;text-align:center;color:#9aa3b2;font-size:12.5px;line-height:1.6}

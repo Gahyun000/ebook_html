@@ -84,8 +84,8 @@ export default function LibraryScreen() {
   return (
     <div className="lib-screen">
       <div className="lib-head">
-        <div className="lib-brand"><div className="logo" aria-label="EVER-SKETCH" /> 내 이북</div>
-        <button className="lib-new" onClick={() => void newProject()}><Plus className="h-4 w-4" /> 새 이북</button>
+        <div className="lib-brand"><div className="logo" aria-label="EVER-SKETCH" /> EVER-SKETCH</div>
+        <button className="lib-new" onClick={() => void newProject()}><Plus className="h-4 w-4" /> 스케치</button>
       </div>
 
       {/* 검색/조회 (표준: 검색어·시작일·종료일·검색·초기화) */}
@@ -111,7 +111,7 @@ export default function LibraryScreen() {
         {loading ? (
           <div className="lib-empty">불러오는 중…</div>
         ) : total === 0 ? (
-          <div className="lib-empty">{q || from || to ? '조건에 맞는 이북이 없어요.' : '아직 이북이 없어요.\n＋ 새 이북으로 시작해 보세요.'}</div>
+          <div className="lib-empty">{q || from || to ? '조건에 맞는 이북이 없어요.' : '아직 이북이 없어요.\n＋ 스케치으로 시작해 보세요.'}</div>
         ) : (
           shown.map((p) => (
             <div key={p.id} className="lib-card">

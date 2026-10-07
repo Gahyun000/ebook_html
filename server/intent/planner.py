@@ -115,7 +115,7 @@ def validate_plan(raw, brief: str = "", warnings: Optional[list[str]] = None):
     if len(pages) > MAX_PAGES:
         warnings.append(f"페이지 {len(pages)}장 → {MAX_PAGES}장으로 축소")
         pages = pages[:MAX_PAGES]
-    title = (str(raw.get("title") or "").strip() or "새 이북")[:80]
+    title = (str(raw.get("title") or "").strip() or "스케치")[:80]
     orientation = raw.get("orientation") if raw.get("orientation") in ORIENTATIONS else "portrait"
     theme = raw.get("theme") if raw.get("theme") in THEMES else "light"
     return {"title": title, "orientation": orientation, "theme": theme, "pages": pages}
@@ -123,7 +123,7 @@ def validate_plan(raw, brief: str = "", warnings: Optional[list[str]] = None):
 
 def _skeleton(brief: str, warnings: list[str]) -> dict:
     warnings.append("LLM 계획 생성에 실패해 최소 골격으로 대체했어요.")
-    title = ((brief or "새 이북").strip() or "새 이북")[:40]
+    title = ((brief or "스케치").strip() or "스케치")[:40]
     pages = [{"cardKey": k, "fields": {}} for k in DEFAULT_SKELETON]
     pages[0]["fields"] = {"title": title}
     return {"title": title, "orientation": "portrait", "theme": "light", "pages": pages}

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""_deck_state5.json 을 EVER-SKETCH 라이브러리에 새 이북으로 넣는다.
+"""_deck_state5.json 을 EVER-SKETCH 라이브러리에 스케치으로 넣는다.
    사용법:  cd ~/Desktop/git/ebook_html && python3 import_deck.py
-   (앱 서버가 떠 있으면 먼저 끄고 실행 → 끝나면 다시 켜고 '내 이북' 새로고침)"""
+   (앱 서버가 떠 있으면 먼저 끄고 실행 → 끝나면 다시 켜고 'EVER-SKETCH' 새로고침)"""
 import sqlite3, json, time, uuid, os, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -36,4 +36,4 @@ print('  페이지:', len(pages), '장')
 print('  방향  :', state.get('orientation'))
 print('  id    :', pid)
 print()
-print('이제 ./run.command 로 앱을 켜고 “내 이북”에서 여세요.')
+print('이제 ./run.command 로 앱을 켜고 “EVER-SKETCH”에서 여세요.')

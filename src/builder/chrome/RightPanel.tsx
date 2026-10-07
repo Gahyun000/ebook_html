@@ -4,7 +4,7 @@ import NumInput from './NumInput'
 import { BRANCH_MAX, BRANCH_BOX, nextBranchSpot } from '../../cards/mindmapEls'
 import { treeShape, descendantCount, knownOf, isTreePage } from '../../cards/treeOps'
 import { useKey } from '../../ui/keyLabel'
-import { useBuilder } from '../../state/store'
+import { useBuilder, nextElId } from '../../state/store'
 import type { PaperType } from '../../state/store'
 import { useCanvasUI } from '../../state/canvasUI'
 import { useSelEl } from '../useSelEl'
@@ -156,7 +156,9 @@ export default function RightPanel() {
     const branches = page.els.filter((e) => ids.has(e.id))
     const { W, H } = pageSize(orientation)
     const spot = nextBranchSpot(center, branches, W, H)
-    const nid = Math.max(0, ...page.els.map((e) => e.id)) + 1
+    // 번호는 **번호표(nextElId)** 에서 받는다(2026-10-06). 전에는 `가장 큰 id + 1` 이라 번호표가 그대로였고,
+    // 가지를 붙인 뒤 놓은 도형이 **같은 번호**를 받았다 — 하나를 옮기면 다른 하나도 따라 움직인다.
+    const nid = nextElId()
     snapPage()
     setCanvas(page.id, {
       els: [...page.els, {
@@ -342,11 +344,11 @@ export default function RightPanel() {
             {elInTree && el.echoOf == null ? (<>
               <div className="insp-sec">트리</div>
               <div className="insp-row">
-                <button className="insp-pill" title="고른 상자 오른쪽 한 칸에 붙입니다"
+                <button className="insp-pill" title="고른 상자 오른쪽 한 칸에 붙입니다 (Space)"
                   onClick={() => { if (!page) return; snapPage(); treeAdd(page.id, selElId, 'child') }}>＋ 자식</button>
                 <button className="insp-pill"
                   title={elIsRoot ? '뿌리는 부모가 없어서, 부모 없는 줄기를 하나 더 만듭니다'
-                                  : '고른 상자 바로 아래, 같은 부모 밑에 붙입니다'}
+                                  : `고른 상자 바로 아래, 같은 부모 밑에 붙입니다 (${K('enter')})`}
                   onClick={() => { if (!page) return; snapPage(); treeAdd(page.id, selElId, elIsRoot ? 'root' : 'sibling') }}>
                   {elIsRoot ? '＋ 새 뿌리' : '＋ 형제'}</button>
                 {elKids > 0 ? (

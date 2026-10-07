@@ -2,6 +2,7 @@ import type React from 'react'
 import { Fragment, useState, useEffect, useRef } from 'react'
 import { flushSync } from 'react-dom'
 import { selectWordOrCaretAtPoint } from '../lib/wordSelect'
+import { isComposingKey } from '../lib/ime'
 import { intakeImage } from '../builder/imageIntake'
 import type { CSSProperties } from 'react'
 import type { Page, FreeEl } from '../state/store'
@@ -146,6 +147,7 @@ export default function FreeLayer({ page, W, H, interactive }: Props) {
   const selEl = useCanvasUI((s) => s.selEl)
   const selEls = useCanvasUI((s) => s.selEls)
   const setSel = useCanvasUI((s) => s.setSel)
+  const setReveal = useCanvasUI((s) => s.setReveal)
   const toggleSel = useCanvasUI((s) => s.toggleSel)
   const setSelMany = useCanvasUI((s) => s.setSelMany)
   const connSrc = useCanvasUI((s) => s.connSrc)
@@ -211,6 +213,15 @@ export default function FreeLayer({ page, W, H, interactive }: Props) {
     editAtRef.current = at || null
     setEditing(id)
   }
+  // **캔버스 밖에서 온 편집 부탁**(2026-10-06 · 단축키로 가지를 붙였을 때). 편집 상태가 여기 안에 있어
+  // 밖에서는 직접 못 연다. 한 번 받고 비운다.
+  const editReq = useCanvasUI((s) => s.editReq)
+  const requestEdit = useCanvasUI((s) => s.requestEdit)
+  useEffect(() => {
+    if (!interactive || editReq == null) return
+    if (page.els.some((e) => e.id === editReq)) startEditing(editReq)
+    requestEdit(null)
+  }, [editReq])
   const [penPts, setPenPts] = useState<[number, number][] | null>(null)
   const [mouse, setMouse] = useState<Pt | null>(null)
   const [bending, setBending] = useState<Pt | null>(null)
@@ -812,7 +823,7 @@ export default function FreeLayer({ page, W, H, interactive }: Props) {
       nb.text = ''
       addEl(page.id, nb)
       addConn(page.id, { from: el.id, to: nb.id })
-      setSel(nb.id); startEditing(nb.id)
+      setSel(nb.id); startEditing(nb.id); setReveal(nb.id)
     }
     window.addEventListener('pointermove', move); window.addEventListener('pointerup', up)
   }
@@ -1011,7 +1022,9 @@ export default function FreeLayer({ page, W, H, interactive }: Props) {
                               // 값은 endEditing() 이 먼저 커밋한다. 칸을 옮기기 전에 반드시 거쳐야 한다.
                               const to = (nr: number, nc: number) => { e.preventDefault(); e.stopPropagation(); endEditing(); pickRange(el, nr, nc, nr, nc) }
                               if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); endEditing(); return }
-                              if (e.key === 'Enter' && !e.shiftKey) { to(Math.min(R - 1, r + 1), c); return }
+                              // 한글 조합 중의 Enter 로는 칸을 옮기지 않는다 — 확정 뒤 Enter 가 한 번 더 와서
+                              // 아래 칸이 편집 상태로 열리던 것(lib/ime). Escape · Tab 은 그대로다.
+                              if (e.key === 'Enter' && !e.shiftKey && !isComposingKey(e)) { to(Math.min(R - 1, r + 1), c); return }
                               if (e.key === 'Tab') { to(r, e.shiftKey ? Math.max(0, c - 1) : Math.min(C - 1, c + 1)) }
                             } : undefined}
                             onPointerDown={(e) => {
@@ -1115,7 +1128,8 @@ export default function FreeLayer({ page, W, H, interactive }: Props) {
                         if (!n) return
                         if (editRef.current && editRef.current.node === n) return
                         editRef.current = { id: el.id, node: n, commit: () => updateEl(page.id, el.id, { text: n.textContent || '' }) }
-                        n.focus()
+                        // 브라우저가 멋대로 굴리지 않게 한다 — 화면을 옮기는 일은 Preview 가 `revealId` 로 한다.
+                        n.focus({ preventScroll: true })
                       }}
                       onFocus={(e) => { const n = e.currentTarget; requestAnimationFrame(() => {
                         const sel = window.getSelection(); if (!sel) return
@@ -1144,6 +1158,14 @@ export default function FreeLayer({ page, W, H, interactive }: Props) {
                         // startEditing 이 좌표를 다시 적어 두어, 다음 편집이 엉뚱한 자리를 고른다.
                         e.stopPropagation()
                         selectWordOrCaretAtPoint(e.currentTarget, e.clientX, e.clientY)
+                      }}
+                      // **가지 상자에서는 Enter 가 글을 끝낸다**(알마인드 · 2026-10-06). 그래야 「Space → 글 → Enter →
+                      // Enter(형제)」 로 손을 안 떼고 이어 간다. 줄바꿈은 Shift+Enter. 트리 밖 도형은 예전 그대로다.
+                      onKeyDown={(e) => {
+                        if (e.key !== 'Enter' || e.shiftKey || e.metaKey || e.ctrlKey || e.altKey || isComposingKey(e)) return
+                        if (!tshape || !tshape.members.includes(el.echoOf ?? el.id)) return
+                        e.preventDefault(); e.stopPropagation()
+                        endEditing()
                       }}
                       onBlur={() => { endEditing() }}>{el.text}</div>
                   : <div className="feltext" style={txtStyle}>{el.text}</div>)}

@@ -33,6 +33,23 @@ export default function Filmstrip() {
   function stopAuto() { if (autoRef.current !== null) { window.clearInterval(autoRef.current); autoRef.current = null } }
   useEffect(() => stopAuto, [])
 
+  /**
+   * **초점이 고른 쪽을 따라간다.** 다만 **이미 목록 안에 초점이 있을 때만** 옮긴다 —
+   * 안 그러면 캔버스에서 글을 치는 도중에 초점을 빼앗아 간다.
+   *
+   * (2026-10-06) **훅은 「쪽이 없으면 일찍 돌아가기」 앞에 둔다.** 전에는 이 효과가 그 뒤에 있어서,
+   * 마지막 쪽을 지워 쪽이 0 이 되는 순간 훅 개수가 바뀌어 화면이 멈췄다(React #300).
+   */
+  useEffect(() => {
+    const list = listRef.current
+    if (!list || !list.contains(document.activeElement)) return
+    const cur = list.querySelector<HTMLElement>('.axth.on')
+    if (cur && cur !== document.activeElement) {
+      cur.focus()
+      cur.scrollIntoView({ block: 'nearest' })
+    }
+  }, [sel, pages.length])
+
   // 커서 y 가 "몇 번째와 몇 번째 사이"인지. 각 카드의 중앙선을 넘었는지로 판정한다.
   function dropIndexAt(clientY: number): number {
     const list = listRef.current
@@ -93,8 +110,10 @@ export default function Filmstrip() {
 
   const { W, H } = pageSize(orientation)
   const miniW = orientation === 'landscape' ? 168 : 150
-  const scale = miniW / W
-  const miniH = H * scale
+  // 그림 칸은 border-box 라 안쪽이 테두리(1px × 2)만큼 좁다. 배율을 바깥 폭으로 정하면 종이 그림 오른쪽·아래
+  // 2px 가 늘 잘렸다(2026-10-06). 안쪽 폭으로 정하고, 높이는 안쪽 높이 + 테두리로 맞춘다.
+  const scale = (miniW - 2) / W
+  const miniH = Math.round(H * scale) + 2
 
   /**
    * **슬라이드 목록에서 키보드로 움직인다**(EVER-SKETCH1 1219bbd).
@@ -120,20 +139,6 @@ export default function Filmstrip() {
     if (e.key === 'End') { eat(); go(pages.length - 1); return }
     if (e.key === 'Enter') { eat(); addCard('slide'); return }
   }
-
-  /**
-   * **초점이 고른 쪽을 따라간다.** 다만 **이미 목록 안에 초점이 있을 때만** 옮긴다 —
-   * 안 그러면 캔버스에서 글을 치는 도중에 초점을 빼앗아 간다.
-   */
-  useEffect(() => {
-    const list = listRef.current
-    if (!list || !list.contains(document.activeElement)) return
-    const cur = list.querySelector<HTMLElement>('.axth.on')
-    if (cur && cur !== document.activeElement) {
-      cur.focus()
-      cur.scrollIntoView({ block: 'nearest' })
-    }
-  }, [sel, pages.length])
 
   return (
     <div className={'axth-list' + (drag ? ' dragging' : '')} ref={listRef}

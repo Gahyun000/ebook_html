@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { newBlock } from '../state/store'
 import type { Block, BlockType } from '../state/store'
 import { useKey } from '../ui/keyLabel'
+import { isComposingKey } from '../lib/ime'
 
 const TYPES: { t: BlockType; label: string; icon: string; child?: boolean }[] = [
   { t: 'text', label: '텍스트', icon: '¶', child: true },
@@ -85,6 +86,7 @@ export default function NoteBlocks({ blocks, onChange, compact }: { blocks: Bloc
     updateAt(ti, ci, { text: val })
   }
   function onKey(e: React.KeyboardEvent<HTMLTextAreaElement>, ti: number, ci: number | null, b: Block) {
+    if (isComposingKey(e)) return // 한글 조합 중의 키는 입력기 몫(lib/ime — 줄이 둘 생기던 것)
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'b') { e.preventDefault(); updateAt(ti, ci, { bold: !b.bold }); return }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { newBlock } from '../state/store'
 import type { Block, BlockType } from '../state/store'
+import { isComposingKey } from '../lib/ime'
 
 const COLORS = ['#1a1a1a', '#2a78d6', '#c5501f', '#0f9d58', '#7a5af8']
 const ALLOWED = new Set<BlockType>(['h1', 'h2', 'text', 'bullet', 'numbered', 'todo'])
@@ -45,6 +46,7 @@ export default function PlainEditor({ blocks, onChange }: { blocks: Block[]; onC
   const auto = (ta: HTMLTextAreaElement) => { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px' }
 
   function onKey(e: React.KeyboardEvent<HTMLTextAreaElement>, i: number) {
+    if (isComposingKey(e)) return // 한글 조합 중의 Enter · Backspace 는 입력기 몫(lib/ime — 줄이 둘 생기던 것)
     const b = blocks[i]
     const ta = e.currentTarget
     if (e.key === 'Enter' && !e.shiftKey) {

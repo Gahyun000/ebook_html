@@ -26,8 +26,7 @@ export default function TitleBar({ onPresent }: { onPresent: () => void }) {
       <a className="folio-chip" style={folioChip} href={FOLIO_URL} target="_blank" rel="noreferrer"
          title="EVER-FOLIO(이북 라이브러리) 열기 — 127.0.0.1:8811">↗ EVER-FOLIO</a>
       <button className="rbtn" onClick={onPresent} title="구글 슬라이드식 슬라이드쇼">▷ 슬라이드쇼</button>
-      <button className="rbtn pri" onClick={() => void newProject()} title="새 이북 시작">＋ 새 이북</button>
-      <div className="av">가</div>
+      <button className="rbtn pri" onClick={() => void newProject()} title="스케치 시작">＋ 스케치</button>
     </div>
   )
 }

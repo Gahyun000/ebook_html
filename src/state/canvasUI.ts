@@ -35,6 +35,13 @@ export interface CanvasUI {
   setHlColor: (c: string) => void
   setHlWidth: (w: number) => void
   setEraserWidth: (w: number) => void
+  /** **한 번 쓰고 비우는 부탁 둘.** 캔버스 밖(단축키)에서 상자를 만들었을 때 —
+   *  `revealId`: 이 상자가 보이게 작업면을 굴려 달라(Preview 가 받는다).
+   *  `editReq`: 이 상자의 글 편집을 열어 달라(FreeLayer 가 받는다 — 편집 상태가 그 안에 있다). */
+  revealId: number | null
+  setReveal: (id: number | null) => void
+  editReq: number | null
+  requestEdit: (id: number | null) => void
   pickerOpen: boolean
   openPicker: () => void
   closePicker: () => void
@@ -67,6 +74,10 @@ export const useCanvasUI = create<CanvasUI>((set) => ({
   setHlColor: (c) => set({ hlColor: c }),
   setHlWidth: (w) => set({ hlWidth: w }),
   setEraserWidth: (w) => set({ eraserWidth: w }),
+  revealId: null,
+  setReveal: (id) => set({ revealId: id }),
+  editReq: null,
+  requestEdit: (id) => set({ editReq: id }),
   pickerOpen: false,
   openPicker: () => set({ pickerOpen: true }),
   closePicker: () => set({ pickerOpen: false }),

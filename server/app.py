@@ -556,7 +556,7 @@ def edit(req: EditIn):
 
 
 
-# ───────────────────────── 프로젝트(내 이북) ─────────────────────────
+# ───────────────────────── 프로젝트(EVER-SKETCH) ─────────────────────────
 class ProjectCreateIn(BaseModel):
     name: Optional[str] = None
     state: Optional[dict] = None

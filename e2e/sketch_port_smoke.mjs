@@ -159,7 +159,7 @@ STAGES.push(['1단계', async () => {
 // ── 2단계 ─────────────────────────────────────────────────
 const SHOT_DIR = process.env.SHOT_DIR || ''
 
-/** 목록 화면으로 돌아가 새 이북을 하나 연다. 앞 단계의 흔적 없이 시작한다. */
+/** 목록 화면으로 돌아가 스케치을 하나 연다. 앞 단계의 흔적 없이 시작한다. */
 async function freshBook() {
   await p.goto(URL, { waitUntil: 'networkidle' })
   await p.locator('.lib-new').click()
@@ -167,16 +167,16 @@ async function freshBook() {
   await p.waitForTimeout(400)
 }
 
-// (추가 요청) 새 이북을 열자마자 ⌘Z 를 누르면 첫 빈 슬라이드가 지워졌다.
+// (추가 요청) 스케치을 열자마자 ⌘Z 를 누르면 첫 빈 슬라이드가 지워졌다.
 // newProject 가 resetHistory() 를 addCard 보다 **먼저** 불러, 첫 장이 되돌릴 수 있는 일이 됐다.
-STAGES.push(['2단계 · 새 이북 직후 ⌘Z', async () => {
+STAGES.push(['2단계 · 스케치 직후 ⌘Z', async () => {
   await freshBook()
   const n0 = await thumbs.count()
   await p.evaluate(() => { const a = document.activeElement; if (a && a.blur) a.blur() })   // 입력칸 밖에 초점
   await p.keyboard.press('ControlOrMeta+z'); await p.waitForTimeout(300)
   const n1 = await thumbs.count()
-  ok('[새 이북] 첫 슬라이드 한 장으로 시작한다', n0 === 1, String(n0))
-  ok('[새 이북] 바로 ⌘Z 를 눌러도 첫 슬라이드가 남는다', n1 === 1, `${n0} → ${n1}`)
+  ok('[스케치] 첫 슬라이드 한 장으로 시작한다', n0 === 1, String(n0))
+  ok('[스케치] 바로 ⌘Z 를 눌러도 첫 슬라이드가 남는다', n1 === 1, `${n0} → ${n1}`)
 }])
 
 // ① 화면 배율 (EVER-SKETCH1 1363964 배율 부분) — 원본 e2e/zoom_smoke.mjs 를 옮김
@@ -361,7 +361,10 @@ STAGES.push(['3단계 · 표 편집 · 한글 입력', async () => {
   const rh1 = (await cell(1, 0).boundingBox()).height, T1 = (await tblFel().boundingBox()).height
   ok('[표3] 행을 넣으면 표가 한 행만큼 커진다', T1 > T0 + rh0 * 0.8 && (await tblFel().locator('.feltd[data-c="0"]').count()) === 3,
     `표 ${T0.toFixed(1)} → ${T1.toFixed(1)} (행 ${rh0.toFixed(1)})`)
-  ok('[표3] 남은 행의 높이는 그대로다', Math.abs(rh1 - rh0) < 1.5, `${rh0.toFixed(1)} → ${rh1.toFixed(1)}`)
+  // **종이 좌표로 잰다**(2026-10-06). 화면 px 로 1.5 를 허용했더니 배율이 커지면(작업면을 꽉 채우며 종이가 커졌다) 같은 어긋남이
+  // 그만큼 불어나 넘었다 — 창 높이 853 · 880 에서는 통과, 900 · 940 에서는 실패. 표 높이를 정수로 맞추며 생기는 어긋남(종이 좌표 약 1.4)이다.
+  const zT = lb.width / (await layer().evaluate((n) => parseFloat(n.style.width)))
+  ok('[표3] 남은 행의 높이는 그대로다', Math.abs(rh1 - rh0) / zT < 2, `${rh0.toFixed(1)} → ${rh1.toFixed(1)} (배율 ${zT.toFixed(3)})`)
 
   // ④ 병합 칸에 닿으면 범위가 커진다 · 머리 띠
   await drag(await center(cell(0, 0)), await center(cell(1, 0)))
@@ -1038,6 +1041,676 @@ STAGES.push(['6단계 · 공용 창 껍데기', async () => {
     await p.keyboard.press('Escape'); await p.waitForTimeout(150)
     return n === 0
   })())
+}])
+
+// ── 7단계 ─────────────────────────────────────────────────
+// 2026-10-02 · 화면 기록 두 개에서 나온 것.
+//   · 방향 줄의 「고른 것」 표시(EVER-SKETCH1 0398eb3 ①) — 가로·세로가 반대로 읽혔다.
+//   · 여럿을 **선과 함께** 복사·붙여넣기(canvas/clipboard.ts) — 머메이드 트리를 통째로 붙이면 상자 하나만 왔다.
+//   · 챗봇 패널 안 메모 탭(EVER-SKETCH1 fb61df4) — 떠 있는 단추 둘을 하나로.
+if (SHOT_DIR) { const fs = await import('node:fs'); fs.mkdirSync(SHOT_DIR + '/s7', { recursive: true }) }
+const BLUE = 'rgb(42, 120, 214)'
+/** 화면 기록에 나온 그림. 가로 종이에서는 아래 띠로 접혀 「개발」 echo 가 하나 생긴다. */
+const VIDEO_MM = 'graph TB\n  A[기획] --> B[설계]\n  B --> C[개발]\n  C --> D{검수}\n  D --> E[배포]\n  D --> B'
+const fels = () => layer().locator('.fel')
+const lines = () => layer().locator('svg path[stroke="#b9c2d4"]')
+/** 종이 전체를 끌어서 그 위의 것을 전부 고른다. **빈 자리에서 눌러야** 끌어 고르기가 된다 —
+ *  트리도 붙인 것도 왼쪽 위 모서리에는 안 놓인다. */
+async function selectAllOnPaper() {
+  const bb = await layer().boundingBox()
+  await p.mouse.move(bb.x + 3, bb.y + 3)
+  await p.mouse.down()
+  await p.mouse.move(bb.x + bb.width / 2, bb.y + bb.height / 2, { steps: 4 })
+  await p.mouse.move(bb.x + bb.width - 3, bb.y + bb.height - 3, { steps: 4 })
+  await p.mouse.up()
+  await p.waitForTimeout(250)
+}
+
+STAGES.push(['7단계 · 방향 줄의 고름 표시', async () => {
+  await freshBook()
+  await deselect()
+  const seg = (t) => panel6().locator('.insp-row.seg button', { hasText: t })
+  const border = (loc) => loc.evaluate((n) => getComputedStyle(n).borderTopColor)
+  const paper = async () => { const bb = await layer().boundingBox(); return bb.width > bb.height ? '가로' : '세로' }
+
+  await seg('가로').click(); await p.waitForTimeout(350)
+  ok('[방향] 「가로」를 누르면 종이가 가로다', (await paper()) === '가로')
+  ok('[방향] 그때 **「가로」에 파란 테두리**가 붙는다', (await border(seg('가로'))) === BLUE, await border(seg('가로')))
+  ok('[방향] 안 고른 「세로」에는 파란 테두리가 없다', (await border(seg('세로'))) !== BLUE, await border(seg('세로')))
+  if (SHOT_DIR) await panel6().screenshot({ path: SHOT_DIR + '/s7/stage7_orientation_landscape.png' })
+
+  await seg('세로').click(); await p.waitForTimeout(350)
+  ok('[방향] 「세로」를 누르면 종이가 세로다', (await paper()) === '세로')
+  ok('[방향] 파란 테두리가 「세로」로 옮겨 간다', (await border(seg('세로'))) === BLUE && (await border(seg('가로'))) !== BLUE,
+    `세로 ${await border(seg('세로'))} · 가로 ${await border(seg('가로'))}`)
+  // 거꾸로 읽히던 원인 — 한 테두리 안에 갇힌 단추 중 안 고른 것이 「흰 알약」으로 남았다.
+  const wrap = await seg('세로').evaluate((n) => { const s = getComputedStyle(n.parentElement); return s.borderTopWidth + ' / ' + s.columnGap })
+  ok('[방향] 단추들이 한 테두리 안에 갇혀 있지 않다(묶음 테두리 0 · 사이 띔)', /^0px \/ [1-9]/.test(wrap), wrap)
+  // 옛 머리줄의 `.seg` 가 깔던 회색 받침 — 그 위의 흰 단추가 「고른 알약」으로 보였다.
+  const tray = await seg('세로').evaluate((n) => { const s = getComputedStyle(n.parentElement); return s.backgroundColor + ' / ' + s.paddingTop })
+  ok('[방향] 묶음에 회색 받침이 없다', tray === 'rgba(0, 0, 0, 0) / 0px', tray)
+  // 같은 묶음을 쓰는 바로 위 「배경」도 같은 말을 한다.
+  const bg = panel6().locator('.insp-row.seg button', { hasText: '밝게' })
+  ok('[방향] 「배경」 줄도 고른 것에 파란 테두리', (await border(bg)) === BLUE, await border(bg))
+  if (SHOT_DIR) await panel6().screenshot({ path: SHOT_DIR + '/s7/stage7_orientation_portrait.png' })
+}])
+
+STAGES.push(['7단계 · 여럿을 선과 함께 복사 · 붙여넣기', async () => {
+  await freshBook()
+  await deselect()
+  await panel6().locator('.insp-row.seg button', { hasText: '가로' }).click(); await p.waitForTimeout(300)
+  const pop = await openPicker()
+  await pop.locator('.cpk-tile', { hasText: '머메이드 TB' }).click(); await p.waitForTimeout(200)
+  await p.locator('.cpk-mm').fill(VIDEO_MM); await p.waitForTimeout(150)
+  await p.locator('.cpk-mmgo').click(); await p.waitForTimeout(500)
+  ok('[복사] (준비) 트리 쪽 — 상자 다섯 + 흐린 「개발」 하나 · 선 다섯', (await fels().count()) === 6 && (await lines().count()) === 5,
+    `${await fels().count()} · ${await lines().count()}`)
+  /**
+   * 지금 종이에 **보이는 그림** — 상자마다 (모양 · 글자 · 자리 · 크기 · 채움 · 글자색), 선마다 지나는 점.
+   * `shift` 만큼 되밀어서 낸다 — 붙인 쪽을 원본과 **글자 그대로** 맞대려고.
+   *
+   * 2026-10-02 오후 5.40 화면 기록: 여섯을 골라 붙였는데 다섯이 붙고, 흐린 「개발」 이 빠진 자리에
+   * 왼쪽 아래 「개발」 에서 「검수」 로 꺾여 올라가는 선이 생겼다. 개수만 세어서는 그걸 못 잡는다 —
+   * 그때 검사는 「상자 다섯 · 선 다섯」 을 **맞다고** 했다. 그래서 그림 자체를 잰다.
+   */
+  const picture = async (shift = 0) => {
+    const boxes = await fels().evaluateAll((ns, s) => ns.map((n) => {
+      const t = n.querySelector('.feltext')
+      return [n.className.split(' ')[1], n.innerText.trim(), parseFloat(n.style.left) - s, parseFloat(n.style.top) - s,
+        parseFloat(n.style.width), parseFloat(n.style.height),
+        getComputedStyle(n).backgroundColor, t ? getComputedStyle(t).color : ''].join('|')
+    }), shift)
+    const paths = await lines().evaluateAll((ns, s) => ns.map((n) =>
+      (n.getAttribute('d') || '').replace(/-?\d+(\.\d+)?/g, (m) => String(Math.round((parseFloat(m) - s) * 10) / 10))), shift)
+    return { boxes: boxes.sort(), paths: paths.sort() }
+  }
+  const only = (a, b) => a.filter((x) => !b.includes(x)).join('  ‖  ') || '(같음)'
+  const srcPic = await picture()
+  if (SHOT_DIR) await p.locator('.stage').first().screenshot({ path: SHOT_DIR + '/s7/stage7_copy_source.png' })
+
+  // 화면 기록 그대로: 끌어서 전부 고르고 → 복사 → 다른 쪽으로 가서 → 붙여넣기
+  await selectAllOnPaper()
+  ok('[복사] 끌어서 여섯을 고른다', /6개 고름/.test(await panel6().innerText()), (await panel6().innerText()).slice(0, 30).replace(/\n/g, ' '))
+  await p.keyboard.press('ControlOrMeta+c'); await p.waitForTimeout(150)
+  await thumbs.nth(0).click(); await p.waitForTimeout(300)
+  ok('[복사] (준비) 붙일 쪽은 비어 있다', (await fels().count()) === 0)
+  await p.keyboard.press('ControlOrMeta+v'); await p.waitForTimeout(350)
+  ok('[붙여넣기] **고른 여섯이 전부** 붙는다 — 흐린 「개발」 도 상자다', (await fels().count()) === 6, String(await fels().count()))
+  ok('[붙여넣기] **선 다섯도 따라온다**', (await lines().count()) === 5, String(await lines().count()))
+  ok('[붙여넣기] 붙인 것이 고른 채로 남는다', /6개 고름/.test(await panel6().innerText()), (await panel6().innerText()).slice(0, 20).replace(/\n/g, ' '))
+  // 보통 쪽에는 다시 앉히는 일이 없다 — 「앉힐 때마다 새로 그려집니다」 는 여기서 틀린 말이다.
+  ok('[붙여넣기] 보통 쪽에서는 「다시 놓은 부모」 안내가 안 뜬다', !/다시 놓은 부모/.test(await panel6().innerText()))
+  await deselect()
+  const dstPic = await picture(20)
+  ok('[붙여넣기] **붙인 그림이 원본과 같다** — 상자마다 모양 · 글자 · 자리 · 크기 · 채움 · 글자색',
+    dstPic.boxes.join('\n') === srcPic.boxes.join('\n'), `붙인 쪽에만: ${only(dstPic.boxes, srcPic.boxes)} / 원본에만: ${only(srcPic.boxes, dstPic.boxes)}`)
+  ok('[붙여넣기] **선도 원본과 같은 길**로 그어진다 — 꺾여 올라가는 새 선이 없다',
+    dstPic.paths.join('\n') === srcPic.paths.join('\n'), `붙인 쪽에만: ${only(dstPic.paths, srcPic.paths)} / 원본에만: ${only(srcPic.paths, dstPic.paths)}`)
+  if (SHOT_DIR) await p.locator('.stage').first().screenshot({ path: SHOT_DIR + '/s7/stage7_copy_pasted.png' })
+
+  await p.keyboard.press('ControlOrMeta+z'); await p.waitForTimeout(300)
+  ok('[붙여넣기] **⌘Z 한 번에** 전부 걷힌다', (await fels().count()) === 0 && (await lines().count()) === 0, `${await fels().count()} · ${await lines().count()}`)
+  await p.keyboard.press('ControlOrMeta+Shift+z'); await p.waitForTimeout(300)
+  ok('[붙여넣기] 다시 하면 전부 돌아온다', (await fels().count()) === 6 && (await lines().count()) === 5, `${await fels().count()} · ${await lines().count()}`)
+
+  // 연달아 붙이면 포개지지 않는다 — 같은 자리면 붙은 줄 모른다.
+  await p.keyboard.press('ControlOrMeta+v'); await p.waitForTimeout(350)
+  const spots = await fels().evaluateAll((ns) => ns.map((n) => n.style.left + ',' + n.style.top))
+  ok('[붙여넣기] 한 번 더 붙이면 열둘 · 선 열', spots.length === 12 && (await lines().count()) === 10, `${spots.length} · ${await lines().count()}`)
+  ok('[붙여넣기] 두 번째 것이 **첫 번째 위에 포개지지 않는다**', new Set(spots).size === 12, String(new Set(spots).size))
+
+  // 복제(⌘D)도 고른 것 전부 — 방금 붙인 여섯이 고른 채다.
+  await p.keyboard.press('ControlOrMeta+d'); await p.waitForTimeout(350)
+  ok('[복제] ⌘D 가 고른 여섯을 **선과 함께** 복제한다', (await fels().count()) === 18 && (await lines().count()) === 15, `${await fels().count()} · ${await lines().count()}`)
+
+  // 잘라내기(⌘X) — 전에는 하나만 담고 전부 지웠다.
+  await selectAllOnPaper()
+  await p.keyboard.press('ControlOrMeta+x'); await p.waitForTimeout(300)
+  ok('[잘라내기] 고른 것이 전부 걷힌다', (await fels().count()) === 0 && (await lines().count()) === 0, `${await fels().count()} · ${await lines().count()}`)
+  await p.keyboard.press('ControlOrMeta+v'); await p.waitForTimeout(350)
+  ok('[잘라내기] 붙이면 **전부 돌아온다** — 하나만 남지 않는다', (await fels().count()) === 18 && (await lines().count()) === 15, `${await fels().count()} · ${await lines().count()}`)
+
+  // 원본 쪽은 그대로다.
+  await thumbs.nth(1).click(); await p.waitForTimeout(300)
+  const stillPic = await picture()
+  ok('[복사] 원본 트리 쪽은 그대로다', stillPic.boxes.join('\n') === srcPic.boxes.join('\n') && stillPic.paths.join('\n') === srcPic.paths.join('\n'),
+    `${await fels().count()} · ${await lines().count()}`)
+
+  // 머메이드(트리) 쪽에 붙이면 **구조까지** 그대로다. 여기서는 흐린 상자가 「다시 놓은 부모」 로 남아야 한다 —
+  // 그 표시를 떼면 흐린 상자가 진짜 뿌리로 굳어, 다시 앉힐 때 붙인 그림이 둘로 쪼개진다.
+  await selectAllOnPaper()
+  await p.keyboard.press('ControlOrMeta+c'); await p.waitForTimeout(150)
+  await p.keyboard.press('ControlOrMeta+v'); await p.waitForTimeout(350)
+  ok('[트리 쪽] 같은 쪽에 붙이면 상자 여섯 · 선 다섯이 는다', (await fels().count()) === 12 && (await lines().count()) === 10, `${await fels().count()} · ${await lines().count()}`)
+  // 붙인 것 중 마지막(= 흐린 사본)이 고른 것이라, 패널이 그것을 두고 말한다.
+  ok('[트리 쪽] 붙인 흐린 상자는 여기서도 「다시 놓은 부모」 다', /다시 놓은 부모/.test(await panel6().innerText()))
+  if (SHOT_DIR) await p.locator('.stage').first().screenshot({ path: SHOT_DIR + '/s7/stage7_tree_pasted.png' })
+  await deselect()
+  /** 첫 「기획」(원본 뿌리)의 접기 손잡이를 누른다 — 접든 펴든 **쪽 전체가 다시 앉는다.**
+   *  앉을 때마다 자리가 바뀌므로 매번 다시 찾는다(6단계 toggleRoot 와 같은 길). */
+  async function toggleFirstRoot() {
+    const rb = await layer().locator('.fel', { hasText: '기획' }).first().boundingBox()
+    const fb = await layer().locator('.tree-fold').evaluateAll((ns) => ns.map((n) => { const r = n.getBoundingClientRect(); return { x: r.x, y: r.y } }))
+    const d = (q) => Math.hypot(q.x - rb.x, q.y - (rb.y + rb.height))
+    const near = fb.reduce((a2, q) => (d(q) < d(a2) ? q : a2), fb[0])
+    await p.mouse.click(near.x + 6, near.y + 6); await p.waitForTimeout(350)
+  }
+  await toggleFirstRoot()                       // 접는다
+  await toggleFirstRoot()                       // 편다 — 붙인 것까지 한꺼번에 다시 앉는다
+  const after = (await fels().allInnerTexts()).map((t) => t.trim())
+  ok('[트리 쪽] 다시 앉혀도 **두 그림이 다 남는다**',
+    ['기획', '설계', '검수', '배포'].every((t) => after.filter((a) => a === t).length === 2), after.join(','))
+  // 상자 열 + 흐린 것 둘. 흐린 사본이 진짜 상자로 굳었다면 「개발」 이 다섯(상자 열하나 + 흐린 것 …)이 된다.
+  ok('[트리 쪽] 「개발」 은 넷이다 — 진짜 둘 + 흐린 것 둘(붙인 흐린 상자가 진짜 상자로 굳지 않는다)',
+    after.length === 12 && after.filter((a) => a === '개발').length === 4, `${after.length}개 · 개발 ${after.filter((a) => a === '개발').length}`)
+  ok('[트리 쪽] 다시 앉힌 뒤에도 선이 열 그대로다', (await lines().count()) === 10, String(await lines().count()))
+  const rects = await fels().evaluateAll((ns) => ns.map((n) => { const r = n.getBoundingClientRect(); return [r.left, r.top, r.right, r.bottom] }))
+  let over = 0
+  for (let i = 0; i < rects.length; i++) for (let j = i + 1; j < rects.length; j++) {
+    const a = rects[i], c = rects[j]
+    if (a[0] < c[2] - 1 && c[0] < a[2] - 1 && a[1] < c[3] - 1 && c[1] < a[3] - 1) over++
+  }
+  ok('[트리 쪽] 다시 앉힌 두 그림이 **서로 안 겹친다**', over === 0, `겹친 쌍 ${over} · 상자 ${rects.length}`)
+  if (SHOT_DIR) { await deselect(); await p.locator('.stage').first().screenshot({ path: SHOT_DIR + '/s7/stage7_tree_reseated.png' }) }
+}])
+
+STAGES.push(['7단계 · 챗봇 패널 안 메모 탭', async () => {
+  await freshBook()
+  ok('[메모] 왼쪽 아래 메모 단추가 없다', (await p.locator('.np-fab').count()) === 0)
+  ok('[메모] 떠 있는 단추는 챗봇 **하나**', (await p.locator('.chat-fab').count()) === 1)
+  const tabs = p.locator('.side-tabs button')
+  const box = async (sel) => { const b2 = await p.locator(sel).boundingBox(); return [b2.x, b2.y, b2.width, b2.height].map((v) => Math.round(v)).join(',') }
+
+  await p.locator('.chat-fab').click(); await p.waitForTimeout(450)
+  ok('[메모] 챗봇을 열면 머리 아래에 탭이 둘', (await tabs.count()) === 2, (await tabs.allInnerTexts()).join(' | '))
+  ok('[메모] 지금 선 칸은 챗봇', (await tabs.nth(0).getAttribute('aria-selected')) === 'true' && (await tabs.nth(1).getAttribute('aria-selected')) === 'false')
+  ok('[메모] 열려 있는 동안 떠 있는 단추는 없다', (await p.locator('.chat-fab').count()) === 0)
+  const chatBox = await box('.chat-panel')
+  if (SHOT_DIR) await p.screenshot({ path: SHOT_DIR + '/s7/stage7_side_chat.png' })
+
+  await tabs.filter({ hasText: '메모' }).click(); await p.waitForTimeout(450)
+  ok('[메모] 메모 탭을 누르면 메모장이 뜬다', (await p.locator('.np-panel').count()) === 1)
+  ok('[메모] 탭은 여전히 **둘**이다(닫힌 챗봇의 탭이 남아 네 칸이 되지 않는다)', (await tabs.count()) === 2, String(await tabs.count()))
+  ok('[메모] 지금 선 칸은 메모', (await tabs.nth(1).getAttribute('aria-selected')) === 'true')
+  const noteBox = await box('.np-panel')
+  ok('[메모] **같은 자리 · 같은 폭**이다 — 탭을 눌러도 패널이 안 움직인다', chatBox === noteBox, `챗봇 ${chatBox} · 메모 ${noteBox}`)
+
+  // 「적어 둔 게 있다」 — 없앤 단추의 파란 점이 탭으로 옮겨 왔다.
+  await p.locator('.np-new').click(); await p.waitForTimeout(400)
+  if (SHOT_DIR) await p.screenshot({ path: SHOT_DIR + '/s7/stage7_side_notes.png' })
+  await tabs.filter({ hasText: '챗봇' }).click(); await p.waitForTimeout(450)
+  ok('[메모] 챗봇으로 돌아가면 메모장은 걷힌다(둘이 동시에 안 뜬다)', (await p.locator('.np-panel').count()) === 0 && (await p.locator('.chat-panel.open').count()) === 1)
+  ok('[메모] 메모가 있으면 챗봇 쪽 「메모」 탭에 **파란 점**', (await p.locator('.side-tabs .side-dot').count()) === 1)
+
+  await p.locator('.chat-panel header button[title="닫기"]').click(); await p.waitForTimeout(450)
+  ok('[메모] 닫으면 챗봇 단추가 돌아온다', (await p.locator('.chat-fab').count()) === 1 && (await p.locator('.chat-panel.open').count()) === 0)
+
+  // 챗봇을 안 여는 사람의 길 — 도구 ▸ 메모장
+  await p.locator('.ax-menu .ax-mwrap button.m', { hasText: '도구' }).click(); await p.waitForTimeout(200)
+  await p.locator('.ax-mdrop .ax-mitem', { hasText: '메모장' }).click(); await p.waitForTimeout(450)
+  ok('[메모] **도구 ▸ 메모장** 으로도 열린다', (await p.locator('.np-panel').count()) === 1 && (await tabs.count()) === 2)
+  // 메모장은 닫혀 있어도 사라지지 않는다 — 쓰던 메모가 열린 채로 돌아온다.
+  ok('[메모] 다시 열면 **쓰던 메모가 그대로** 열려 있다', (await p.locator('.np-title-in').count()) === 1)
+  await p.locator('.np-back').click(); await p.waitForTimeout(250)
+  ok('[메모] 목록에 적어 둔 메모가 하나 있다', (await p.locator('.np-item').count()) === 1, String(await p.locator('.np-item').count()))
+  await p.locator('.np-x').click(); await p.waitForTimeout(300)
+  ok('[메모] 메모장을 닫으면 챗봇 단추가 돌아온다', (await p.locator('.np-panel').count()) === 0 && (await p.locator('.chat-fab').count()) === 1)
+}])
+
+// ── 8단계 ─────────────────────────────────────────────────
+// 2026-10-02 오후 5.41 화면 기록 · **한글 조합 중 Enter**(src/lib/ime.ts).
+// 메모장에서 「ㅌ + Enter」 한 번에 줄이 둘 생기고 같은 글자가 한 번 더 찍혔다. 맥 크롬은 조합 중 Enter 에
+// keydown 을 **두 번** 보낸다 — 그 순서를 CDP 로 그대로 넣는다:
+//   ① 조합 시작(밑줄 친 글자)  ② 조합 중 Enter(isComposing=true · 229)
+//   ③ 입력기가 글자를 확정      ④ Enter 한 번 더(isComposing=false · 13)
+// 같은 모양의 Enter 처리가 있던 다섯 자리를 모두 잰다.
+if (SHOT_DIR) { const fs = await import('node:fs'); fs.mkdirSync(SHOT_DIR + '/s8', { recursive: true }) }
+
+STAGES.push(['8단계 · 한글 조합 중 Enter', async () => {
+  await freshBook()
+  const cdp = await p.context().newCDPSession(p)
+  /** 지금 초점이 있는 칸에 「글자 + Enter」 를 한글 입력기처럼 넣는다. */
+  async function imeEnter(ch) {
+    await cdp.send('Input.imeSetComposition', { text: ch, selectionStart: ch.length, selectionEnd: ch.length }); await p.waitForTimeout(60)
+    await cdp.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 229, nativeVirtualKeyCode: 229 }); await p.waitForTimeout(60)
+    await cdp.send('Input.insertText', { text: ch }); await p.waitForTimeout(60)
+    await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13, text: '\r' })
+    await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 })
+    await p.waitForTimeout(300)
+  }
+
+  // ① 메모장 — 화면 기록의 그 자리
+  await p.locator('.chat-fab').click(); await p.waitForTimeout(400)
+  await p.locator('.side-tabs button', { hasText: '메모' }).click(); await p.waitForTimeout(400)
+  await p.locator('.np-new').click(); await p.waitForTimeout(400)
+  const memo = () => p.locator('.pn-ta').evaluateAll((ns) => ns.map((n) => n.value))
+  await p.locator('.pn-ta').first().click(); await p.waitForTimeout(150)
+  await imeEnter('ㅌ')
+  ok('[한글 Enter] 메모장 — 「ㅌ + Enter」 한 번에 **한 줄**만 는다', JSON.stringify(await memo()) === '["ㅌ",""]', JSON.stringify(await memo()))
+  await imeEnter('ㅌ')
+  ok('[한글 Enter] 메모장 — 두 번 치면 두 줄 · 같은 글자가 두 번 찍히지 않는다', JSON.stringify(await memo()) === '["ㅌ","ㅌ",""]', JSON.stringify(await memo()))
+  await p.keyboard.type('x'); await p.keyboard.press('Enter'); await p.waitForTimeout(250)
+  ok('[한글 Enter] (견줄 것) 영문 「x + Enter」 도 한 줄', JSON.stringify(await memo()) === '["ㅌ","ㅌ","x",""]', JSON.stringify(await memo()))
+  if (SHOT_DIR) await p.locator('.np-panel').screenshot({ path: SHOT_DIR + '/s8/stage8_memo_ime.png' })
+  await p.locator('.np-x').click(); await p.waitForTimeout(300)
+
+  // ② 챗봇 입력창 — 마지막 글자를 한 번 더 보내던 것
+  await p.locator('.chat-fab').click(); await p.waitForTimeout(400)
+  const chatIn = p.locator('.chat-panel footer input')
+  await chatIn.click(); await p.keyboard.type('hi '); await p.waitForTimeout(100)
+  await imeEnter('요'); await p.waitForTimeout(600)
+  const sent = await p.locator('.chat-panel').evaluate((n) => Array.from(n.querySelectorAll('[class*="user"]')).map((x) => x.textContent.trim()).filter(Boolean))
+  ok('[한글 Enter] 챗봇 — 「hi 요 + Enter」 는 **한 번만** 보낸다', sent.length === 1 && /^hi 요/.test(sent[0]), JSON.stringify(sent))
+  ok('[한글 Enter] 챗봇 — 보낸 뒤 입력창이 비어 있다', (await chatIn.inputValue()) === '', JSON.stringify(await chatIn.inputValue()))
+  await p.locator('.chat-panel header button[title="닫기"]').click(); await p.waitForTimeout(400)
+
+  // ③ 표 칸 — 영문과 같이 아래 칸만 골라야 한다(편집 상태로 열리면 안 된다)
+  await p.locator('.ax-menu .ax-mwrap button.m', { hasText: '삽입' }).click(); await p.waitForTimeout(200)
+  await p.locator('.ax-mdrop .ax-mitem', { hasText: '표' }).click(); await p.waitForTimeout(500)
+  const cells = () => layer().locator('.fel.table').first().evaluate((t) => {
+    const cs = Array.from(t.querySelectorAll('.feltd'))
+    return { t01: cs.find((c) => c.getAttribute('data-rc') === '0_1').innerText, editing: cs.filter((c) => c.getAttribute('contenteditable') === 'true').length,
+      picked: cs.filter((c) => c.classList.contains('cellsel')).map((c) => c.getAttribute('data-rc')).join() }
+  })
+  await layer().locator('.feltd[data-rc="0_1"]').dblclick(); await p.waitForTimeout(300)
+  await p.keyboard.press('ControlOrMeta+a'); await p.keyboard.press('Backspace'); await p.waitForTimeout(100)
+  await imeEnter('ㅌ')
+  const tc = await cells()
+  ok('[한글 Enter] 표 칸 — 글자는 한 번 · 편집을 끝내고 **아래 칸만 고른다**(영문과 같다)',
+    tc.t01 === 'ㅌ' && tc.editing === 0 && tc.picked === '1_1', JSON.stringify(tc))
+  await p.keyboard.press('Escape'); await p.keyboard.press('Escape'); await p.waitForTimeout(200)
+
+  // ④ 「빈 페이지」 블록 편집기 — 2026-10-06 부터 오른쪽 아래가 아니라 **메모장 「지금 슬라이드」** 에서 고친다(9단계).
+  await p.locator('.cardpick .add').click(); await p.waitForTimeout(250)
+  await p.locator('.cpk-pop .cpk-tile', { hasText: '빈 페이지' }).click(); await p.waitForTimeout(500)
+  await panel6().locator('button', { hasText: '메모장에서 글 고치기' }).click(); await p.waitForTimeout(450)
+  const be = p.locator('.np-panel .be-ta')
+  await be.nth(1).click(); await p.waitForTimeout(150)
+  await imeEnter('ㅌ')
+  const bv = await be.evaluateAll((ns) => ns.map((n) => n.value))
+  ok('[한글 Enter] 블록 편집기 — 한 줄만 는다', JSON.stringify(bv) === '["","ㅌ",""]', JSON.stringify(bv))
+  await p.locator('.np-x').click(); await p.waitForTimeout(300)
+
+  // ⑤ 카드 글자 칸 — Enter 로 빠져나갈 때 마지막 글자가 두 번 찍히던 것
+  await p.locator('.cardpick .add').click(); await p.waitForTimeout(250)
+  await p.locator('.cpk-pop .cpk-tile', { hasText: '표지' }).first().click(); await p.waitForTimeout(600)
+  const fields = p.locator('.stage .cardedit')
+  await fields.first().click(); await p.waitForTimeout(250)
+  await imeEnter('가')
+  const ft = await fields.first().textContent()
+  ok('[한글 Enter] 카드 글자 칸 — 글자가 **한 번만** 들어가고 칸을 빠져나간다',
+    ft === '가' && (await p.evaluate(() => document.activeElement === document.body)), JSON.stringify(ft))
+}])
+
+// ── 9단계 ─────────────────────────────────────────────────
+// 2026-10-06 · 메모장에서 **지금 슬라이드** 글을 고친다(memo_slide.test.mjs).
+// 사용자: 「메모랑 슬라이드랑 연동되게 / 오른쪽 하단에서 글씨 수정 너무 불편함」. 빈 페이지 글을 고치는 곳이
+// 오른쪽 속성 패널 맨 아래 한 군데였고, 챗봇 단추가 마지막 줄을 가렸다. 그 편집기를 넓은 메모장으로 옮겼다 —
+// 글은 슬라이드 한 곳에만 있고, 메모장은 그것을 고치는 **창**이다.
+if (SHOT_DIR) { const fs = await import('node:fs'); fs.mkdirSync(SHOT_DIR + '/s9', { recursive: true }) }
+
+STAGES.push(['9단계 · 메모장에서 슬라이드 글 고치기', async () => {
+  await freshBook()
+  const pop = await openPicker()
+  await pop.locator('.cpk-tile', { hasText: '빈 페이지' }).click(); await p.waitForTimeout(500)
+  const nPages = await thumbs.count()
+  const be = p.locator('.np-panel .be-ta')
+  const stageText = () => p.locator('.stage').first().innerText()
+
+  // 오른쪽 「내용」 — 글 편집 칸 대신 단추 하나
+  ok('[메모↔슬라이드] 오른쪽 「내용」 에 글 편집 칸이 **없다**', (await panel6().locator('.be-ta').count()) === 0, String(await panel6().locator('.be-ta').count()))
+  const go = panel6().locator('button', { hasText: '메모장에서 글 고치기' })
+  ok('[메모↔슬라이드] 대신 「메모장에서 글 고치기」 단추가 있다', (await go.count()) === 1)
+  if (SHOT_DIR) await panel6().screenshot({ path: SHOT_DIR + '/s9/stage9_right_panel.png' })
+  await go.click(); await p.waitForTimeout(450)
+  ok('[메모↔슬라이드] 누르면 메모장이 열린다', (await p.locator('.np-panel').count()) === 1)
+  ok('[메모↔슬라이드] 메모장에 **지금 슬라이드의 글 칸**이 열린다(제목 · 본문)', (await be.count()) === 2, String(await be.count()))
+  ok('[메모↔슬라이드] 몇 쪽을 고치는지 말한다', new RegExp(nPages + '쪽').test(await p.locator('.np-panel').innerText()))
+
+  // 고치는 즉시 종이에
+  await be.nth(0).click(); await p.keyboard.type('회의 정리'); await p.waitForTimeout(200)
+  await be.nth(1).click(); await p.keyboard.type('다음 주 일정 확인'); await p.waitForTimeout(250)
+  const st1 = await stageText()
+  ok('[메모↔슬라이드] 고치는 즉시 **종이에 보인다**', /회의 정리/.test(st1) && /다음 주 일정 확인/.test(st1), st1.slice(0, 80).replace(/\n/g, ' '))
+  await p.keyboard.press('Enter'); await p.keyboard.type('담당 정하기'); await p.waitForTimeout(250)
+  ok('[메모↔슬라이드] Enter 로 새 줄 — 종이에도 줄이 는다', (await be.count()) === 3 && /담당 정하기/.test(await stageText()), String(await be.count()))
+  if (SHOT_DIR) await p.screenshot({ path: SHOT_DIR + '/s9/stage9_memo_slide.png' })
+
+  // 목록 맨 위의 「지금 슬라이드」 줄
+  await p.locator('.np-panel .np-back').click(); await p.waitForTimeout(250)
+  const row = p.locator('.np-panel .np-slide')
+  const rowText = async () => (await row.innerText().catch(() => '')).replace(/\n/g, ' ')
+  ok('[메모↔슬라이드] 목록 맨 위에 「지금 슬라이드 · N쪽」', (await row.count()) === 1 && new RegExp('지금 슬라이드.*' + nPages + '쪽').test(await rowText()), await rowText())
+  ok('[메모↔슬라이드] 그 줄에 첫 글이 미리 보인다', /회의 정리/.test(await rowText()), await rowText())
+  if (SHOT_DIR) await p.locator('.np-panel').screenshot({ path: SHOT_DIR + '/s9/stage9_memo_list.png' })
+
+  // 빈 페이지가 아닌 쪽에서는 줄이 없다 — 그런 쪽은 종이 위에서 바로 고친다
+  await thumbs.nth(0).click(); await p.waitForTimeout(300)
+  ok('[메모↔슬라이드] 빈 페이지가 아닌 쪽에서는 그 줄이 없다', (await row.count()) === 0)
+  await thumbs.nth(nPages - 1).click(); await p.waitForTimeout(300)
+  await row.click(); await p.waitForTimeout(300)
+  ok('[메모↔슬라이드] 줄을 누르면 그 슬라이드 글 칸이 다시 열린다', (await be.count()) === 3 && (await be.nth(0).inputValue()) === '회의 정리')
+
+  // 「슬라이드로」 보낸 메모 — 보낸 뒤에는 그 새 슬라이드를 고치는 보기로 넘어간다
+  await p.locator('.np-panel .np-back').click(); await p.waitForTimeout(200)
+  await p.locator('.np-panel .np-new').click(); await p.waitForTimeout(300)
+  await p.locator('.np-panel .np-title-in').fill('보낼 메모'); await p.waitForTimeout(200)
+  await p.locator('.np-panel .np-act', { hasText: '슬라이드로' }).click(); await p.waitForTimeout(500)
+  ok('[메모↔슬라이드] 「슬라이드로」 보내면 새 쪽이 생긴다', (await thumbs.count()) === nPages + 1, String(await thumbs.count()))
+  ok('[메모↔슬라이드] 보낸 뒤에는 **그 새 슬라이드의 글 칸**으로 넘어간다 — 메모를 고치며 슬라이드가 안 바뀐다고 헷갈리지 않게',
+    (await be.count()) >= 1 && (await be.nth(0).inputValue()) === '보낼 메모' && new RegExp((nPages + 1) + '쪽').test(await p.locator('.np-panel').innerText()),
+    (await be.count()) + ' · ' + (await be.nth(0).inputValue().catch(() => '')))
+  await p.locator('.np-x').click(); await p.waitForTimeout(300)
+}])
+
+// ── 10단계 ────────────────────────────────────────────────
+// 2026-10-06 · 트리 「＋ 자식」 이 선 없이 왼쪽 위에 포개지던 것 · 마인드맵 「＋ 가지」 번호 겹침(tree_ids.test.mjs).
+// echo 와 「＋ 가지」 가 번호표를 안 뽑고 `가장 큰 id + 1` 로 번호를 받아, 다음에 뽑은 번호가 그것과 같았다.
+STAGES.push(['10단계 · ＋ 자식 · ＋ 가지 번호', async () => {
+  await freshBook()
+  await deselect()
+  await panel6().locator('.insp-row.seg button', { hasText: '가로' }).click(); await p.waitForTimeout(300)
+  let pop = await openPicker()
+  await pop.locator('.cpk-tile', { hasText: '머메이드 TB' }).click(); await p.waitForTimeout(200)
+  await p.locator('.cpk-mm').fill(VIDEO_MM); await p.waitForTimeout(150)
+  await p.locator('.cpk-mmgo').click(); await p.waitForTimeout(500)
+  const ids = () => layer().locator('.fel').evaluateAll((ns) => ns.map((n) => n.getAttribute('data-el-id')))
+  const allUnique = async () => { const v = await ids(); return new Set(v).size === v.length }
+  ok('[＋ 자식] (준비) 화면 기록의 그림 — 상자 다섯 + echo · 선 다섯', (await fels().count()) === 6 && (await lines().count()) === 5)
+  // **종이 안 좌표**로 잰다 — 화면 좌표는 오른쪽 패널이 바뀔 때 몇 px 밀려서, 처음 짠 검사가 포개진 것을 놓쳤다.
+  const spot = (loc) => loc.evaluate((n) => [parseFloat(n.style.left), parseFloat(n.style.top)])
+  async function addChildOf(t) {
+    await deselect()
+    await layer().locator('.fel', { hasText: t }).first().click(); await p.waitForTimeout(250)
+    await panel6().locator('.insp-pill', { hasText: '＋ 자식' }).click(); await p.waitForTimeout(400)
+  }
+
+  await addChildOf('배포')
+  ok('[＋ 자식] 선이 하나 는다(5 → 6) — 새 상자가 「배포」 에 이어진다', (await lines().count()) === 6, String(await lines().count()))
+  const nbLoc = layer().locator('.fel', { hasText: '새 상자' }).first()
+  const nb = (await nbLoc.count()) ? await spot(nbLoc) : null
+  const rt = await spot(layer().locator('.fel', { hasText: '기획' }).first())
+  ok('[＋ 자식] 새 상자가 **왼쪽 위 뿌리 자리에 포개지지 않는다**', !!nb && !(nb[0] === rt[0] && nb[1] === rt[1]),
+    nb ? `새 상자 ${nb} · 뿌리 ${rt}` : '새 상자 없음')
+  ok('[＋ 자식] 한 쪽 안의 번호가 모두 다르다', await allUnique(), JSON.stringify(await ids()))
+  if (SHOT_DIR) { await deselect(); await p.locator('.stage').first().screenshot({ path: SHOT_DIR + '/s9/stage10_tree_child.png' }) }
+  await addChildOf('배포')
+  ok('[＋ 자식] 한 번 더 — 선이 또 는다(6 → 7)', (await lines().count()) === 7, String(await lines().count()))
+  ok('[＋ 자식] 두 번째 뒤에도 번호가 모두 다르다', await allUnique())
+
+  // 마인드맵 「＋ 가지」 뒤에 놓은 글상자와 번호가 겹치지 않는다
+  pop = await openPicker()
+  await pop.locator('.cpk-tile', { hasText: '마인드맵' }).first().click(); await p.waitForTimeout(200)
+  await pop.locator('.cpk-br', { hasText: '4' }).click(); await p.waitForTimeout(500)
+  await deselect()
+  await panel6().locator('.insp-pill', { hasText: '＋ 가지' }).click(); await p.waitForTimeout(300)
+  await placeText(); await p.keyboard.press('Escape'); await p.waitForTimeout(200)
+  ok('[＋ 가지] 가지를 붙인 뒤 놓은 글상자와 **번호가 겹치지 않는다**', await allUnique(), JSON.stringify(await ids()))
+}])
+
+// ── 11단계 ────────────────────────────────────────────────
+// 2026-10-06 · 머리줄 오른쪽 끝 「가」 동그라미 — 하는 일이 없는 장식이라 걷었다(title_bar.test.mjs).
+// 단추 글자는 바뀌는 중이라(「＋ 새 이북」 → 「＋ 스케치」) 글자가 아니라 자리(클래스)로 찾는다.
+STAGES.push(['11단계 · 머리줄 동그라미', async () => {
+  await freshBook()
+  ok('[머리줄] 하는 일 없는 동그라미 「가」 가 없다', (await p.locator('.ax-title .av').count()) === 0, String(await p.locator('.ax-title .av').count()))
+  const bar = await p.locator('.ax-title').boundingBox()
+  const end = await p.locator('.ax-title .rbtn.pri').boundingBox()
+  const gap = Math.round(bar.x + bar.width - (end.x + end.width))
+  ok('[머리줄] 새로 만들기 단추가 **오른쪽 끝**에 선다(머리줄 안쪽 여백 16px)', gap >= 14 && gap <= 18, gap + 'px')
+  if (SHOT_DIR) await p.locator('.ax-title').screenshot({ path: SHOT_DIR + '/s9/stage11_title_bar.png' })
+}])
+
+// ── 12단계 ────────────────────────────────────────────────
+// 2026-10-06 · 쪽 목록 폭이 **종이 방향을 따른다**(film_width.test.mjs). 사용자: 「왼쪽 폭이 세로기준이라
+// 가로슬라이드는 살짝 잘리는거」 — 화면 기록 끝에서 경계를 끌어 「이 정도 폭」(232px)을 보여 줬다.
+// 헤드리스 크롬은 스크롤 막대를 감춰 띄운다(--hide-scrollbars) — 막대 모양을 입혀도 자리를 안 차지한다.
+// 사용자 화면처럼 **막대가 15px 를 차지하는** 조건을, 목록 오른쪽에 15px 테두리를 둬서 만든다(안쪽 폭이 똑같이 준다).
+STAGES.push(['12단계 · 쪽 목록 폭', async () => {
+  await freshBook()
+  const bar = await p.addStyleTag({ content: '.axth-list{border-right:15px solid #e3e6ec}' })
+  const film = () => p.locator('.ax-film').evaluate((n) => Math.round(n.getBoundingClientRect().width))
+  /** 목록이 넘치는가 · 칸 안쪽을 넘는(=잘리는) 종이 그림이 몇인가. */
+  const fit = () => p.evaluate(() => {
+    const list = document.querySelector('.axth-list')
+    const sb = list.offsetWidth - list.clientWidth
+    const right = list.getBoundingClientRect().right - sb
+    const bad = Array.from(document.querySelectorAll('.axth-mini')).filter((m) => {
+      const r = m.firstElementChild.getBoundingClientRect()
+      return r.width > m.clientWidth + 0.5 || r.height > m.clientHeight + 0.5 || m.getBoundingClientRect().right > right + 0.5
+    }).length
+    return { over: list.scrollWidth > list.clientWidth, bad, sb }
+  })
+  await deselect()
+  ok('[쪽 목록] 세로 새 이북 — 목록 폭 212', (await film()) === 212, String(await film()))
+  await panel6().locator('.insp-row.seg button', { hasText: '가로' }).click(); await p.waitForTimeout(350)
+  ok('[쪽 목록] 가로로 바꾸면 **232**(사용자가 끌어 보인 폭)', (await film()) === 232, String(await film()))
+  for (let i = 0; i < 3; i++) { await thumbs.last().click(); await p.keyboard.press('Enter'); await p.waitForTimeout(200) }
+  const f1 = await fit()
+  ok('[쪽 목록] 가로 · 쪽 넷 — 목록이 옆으로 넘치지 않는다', !f1.over, JSON.stringify(f1))
+  ok('[쪽 목록] 가로 그림이 **잘리지 않는다**(종이 그림이 칸 안쪽 안에)', f1.bad === 0, JSON.stringify(f1))
+  if (SHOT_DIR) await p.locator('.ax-film').screenshot({ path: SHOT_DIR + '/s9/stage12_film_landscape.png' })
+  await deselect()
+  await panel6().locator('.insp-row.seg button', { hasText: '세로' }).click(); await p.waitForTimeout(350)
+  ok('[쪽 목록] 다시 세로 → 212', (await film()) === 212, String(await film()))
+  const f2 = await fit()
+  ok('[쪽 목록] 세로에서도 넘침 · 잘림 없음', !f2.over && f2.bad === 0, JSON.stringify(f2))
+
+  // 사람이 경계를 끌어 정한 폭은 방향을 바꿔도 그대로
+  const h = await p.locator('.ax-resize.l').boundingBox()
+  await p.mouse.move(h.x + h.width / 2, h.y + 40); await p.mouse.down()
+  await p.mouse.move(h.x + h.width / 2 + 24, h.y + 40, { steps: 4 })
+  await p.mouse.move(h.x + h.width / 2 + 48, h.y + 40, { steps: 4 }); await p.mouse.up(); await p.waitForTimeout(250)
+  const dragged = await film()
+  ok('[쪽 목록] 경계를 끌면 그 폭이 된다', dragged >= 255 && dragged <= 265, String(dragged))
+  await deselect()
+  await panel6().locator('.insp-row.seg button', { hasText: '가로' }).click(); await p.waitForTimeout(350)
+  ok('[쪽 목록] **끌어 정한 폭은** 방향을 바꿔도 그대로', (await film()) === dragged, `${dragged} → ${await film()}`)
+
+  // 쪽을 끝까지 지워도 화면이 멈추지 않는다(React #300 — 훅이 「쪽이 없으면 일찍 돌아가기」 뒤에 있었다)
+  const before = errs.length
+  while ((await thumbs.count()) > 0) {
+    const t = thumbs.first(); await t.hover(); await p.waitForTimeout(80)
+    await t.locator('.axth-tools .del').click({ force: true }); await p.waitForTimeout(220)
+    if (errs.length > before) break
+  }
+  ok('[쪽 목록] 쪽을 끝까지 지워도 **화면 오류가 없다**', errs.length === before, errs.slice(before).join(' | ').slice(0, 120))
+  ok('[쪽 목록] 빈 목록 안내가 보인다', (await p.locator('.axth-empty').count()) === 1)
+  await bar.evaluate((n) => n.remove())
+}])
+
+// ── 13단계 ────────────────────────────────────────────────
+// 2026-10-06 · **작업면 꽉 채우기 + 알마인드식 가지 키**(work_area · mind_keys · tree_keys.test.mjs).
+// 화면 기록(오후 3.38.49): 가로 덱에서 파란 ＋ 점으로 붙인 상자가 종이 밖에 생기자 회색 작업창이 통째로 구르고 종이가 밀렸다.
+// **창 전체가 슬라이드다**(slide_grow.test.mjs) — 테두리도 뒷바탕도 없고, 넘치면 슬라이드가 비율대로 늘어나 이 창 안에서 굴려 본다.
+// 쪽 목록 · 발표 · 내보내기에는 늘어난 슬라이드를 통째로 줄여 **한 장에 전부** 담는다(잘리는 것 없음).
+// 상자를 고르고 Space · Enter 로 가지를 붙이면 그 묶음이 **기준 크기 안에** 다시 앉는다.
+STAGES.push(['13단계 · 작업면 · 가지 키', async () => {
+  await freshBook()
+  await deselect()
+  await panel6().locator('.insp-row.seg button', { hasText: '가로' }).click(); await p.waitForTimeout(350)
+  const stage = p.locator('.stage').first()
+  const st = () => stage.evaluate((n) => { const c = getComputedStyle(n); return {
+    ox: c.overflowX, oy: c.overflowY, bg: c.backgroundColor, sw: n.scrollWidth, cw: n.clientWidth, sh: n.scrollHeight, ch: n.clientHeight, sl: n.scrollLeft } })
+  /** 종이 자리(넓이 div 안 좌표)와 배율 — 화면 좌표는 굴리면 바뀌므로 쓰지 않는다. */
+  const paper = () => p.locator('.stage .pv-paper').evaluate((n) => ({ left: parseFloat(n.style.left), top: parseFloat(n.style.top), w: parseFloat(n.style.width) }))
+  const spots = () => layer().locator('.fel').evaluateAll((ns) => ns.map((n) => [parseFloat(n.style.left), parseFloat(n.style.top), parseFloat(n.style.width), parseFloat(n.style.height)]))
+  const inPaper = async () => (await spots()).every(([x, y, w, h]) => x >= 0 && y >= 0 && x + w <= 640 && y + h <= 482)
+  const pct = async () => parseInt(await p.locator('.pv-zoom .v').innerText(), 10)
+
+  const s0 = await st()
+  ok('[작업면] 「미리보기」 글자 줄이 없다', (await p.locator('.pv-h').count()) === 0)
+  const cardBg = await p.locator('.stage .pwc-bg > div > *').first().evaluate((n) => getComputedStyle(n).backgroundColor)
+  ok('[작업면] 뒷바탕이 따로 없다 — 작업면 색 = **그 쪽의 바탕색**', s0.bg === cardBg && s0.bg !== 'rgba(0, 0, 0, 0)', `${s0.bg} / ${cardBg}`)
+  ok('[작업면] 슬라이드 **테두리 선 · 그림자가 없다**', await p.locator('.stage .pv-paper').evaluate((n) => getComputedStyle(n).outlineStyle === 'none')
+    && await p.locator('.stage .pwc-bg').evaluate((n) => getComputedStyle(n).overflow === 'hidden'))
+  ok('[작업면] 종이 안에만 있을 때 막대가 없다', s0.ox === 'hidden' && s0.oy === 'hidden', JSON.stringify(s0))
+  const sbox = await stage.boundingBox()
+  const wrap = await p.locator('.ax-stage-wrap').boundingBox()
+  ok('[작업면] 작업면이 가운데 칸의 **폭을 꽉** 채운다', Math.abs(sbox.width - wrap.width) < 1 && Math.abs(sbox.x - wrap.x) < 1, `${Math.round(sbox.width)} / ${Math.round(wrap.width)}`)
+
+  // 영상의 그림 — 종이 오른쪽 끝 가까이에 상자를 놓고, 파란 ＋ 점(오른쪽)으로 하나 더 붙인다.
+  const lb = await layer().boundingBox(); const z = lb.width / 640
+  await p.keyboard.press('r')
+  await p.mouse.click(lb.x + 540 * z, lb.y + 240 * z); await p.waitForTimeout(250)
+  await deselect()
+  const p0 = await paper(), z0 = await pct()
+  const first = layer().locator('.fel').first()
+  await first.hover(); await p.waitForTimeout(200)
+  const dots = await layer().locator('.cpt').evaluateAll((ns) => ns.map((n) => { const r = n.getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2] }))
+  const dot = dots.slice().sort((a, b) => b[0] - a[0])[0]
+  ok('[＋ 점] (준비) 상자에 올리면 파란 점 넷이 뜬다', dots.length === 4, String(dots.length))
+  // 점을 **끌어서** 종이 밖(x=700)에 놓는다 — 영상에서 한 그대로.
+  await p.mouse.move(dot[0], dot[1]); await p.mouse.down()
+  await p.mouse.move(lb.x + 660 * z, lb.y + 243 * z, { steps: 4 }); await p.mouse.move(lb.x + 700 * z, lb.y + 243 * z, { steps: 4 })
+  await p.mouse.up(); await p.waitForTimeout(400)
+  const sp = await spots()
+  ok('[＋ 점] (준비) 새 상자가 **기준 크기 밖**(오른쪽)에 생겼다 — 영상의 그 상태', sp.length === 2 && sp[1][0] + sp[1][2] > 640, JSON.stringify(sp))
+  const s1 = await st()
+  const lw = await layer().evaluate((n) => [parseFloat(n.style.width), parseFloat(n.style.height)])
+  ok('[작업면] **슬라이드가 늘어난다** — 새 상자까지가 슬라이드다(도형 층이 기준 640×482 보다 크고 비율은 같다)',
+    lw[0] >= sp[1][0] + sp[1][2] && Math.abs(lw[0] / lw[1] - 640 / 482) < 0.001, JSON.stringify(lw))
+  ok('[작업면] 넘친 만큼 이 창 안에서 굴려 본다', s1.ox === 'scroll' && s1.oy === 'scroll' && s1.sw > s1.cw, JSON.stringify(s1))
+  const nb = await layer().locator('.fel').nth(1).boundingBox(), sb2 = await stage.boundingBox()
+  ok('[작업면] 새 상자가 **창 안에 다 보인다**(그 상자로 굴렸다)', nb.x >= sb2.x && nb.x + nb.width <= sb2.x + sb2.width && nb.y >= sb2.y && nb.y + nb.height <= sb2.y + sb2.height,
+    `상자 ${Math.round(nb.x)}~${Math.round(nb.x + nb.width)} · 창 ${Math.round(sb2.x)}~${Math.round(sb2.x + sb2.width)} · 굴린 양 ${s1.sl}`)
+  ok('[작업면] 종이 밖으로 나간 **선이 잘리지 않는다**', (await layer().locator('svg.freeconn').evaluate((n) => getComputedStyle(n).overflow)) === 'visible')
+  const capTxt = (await p.locator('.pv-cap').innerText()).replace(/\s+/g, ' ')
+  ok('[작업면] 「이북에는 N% 로 줄여 담김」 을 알려 준다(「안 담김」 이 아니다)', /이북에는 \d+% 로 줄여 담김/.test(capTxt) && !/안 담김/.test(capTxt), capTxt.slice(-40))
+  // 같은 상태(아무것도 안 고름)끼리 견준다 — 글을 고치는 동안에는 위 도구줄 높이가 달라져 작업면 높이도 몇 px 달라진다.
+  await deselect()
+  const p1 = await paper()
+  ok('[작업면] 슬라이드 자리 · 배율이 **그대로**다(밀리지 않고 오른쪽 · 아래로만 늘어난다)', p1.left === p0.left && p1.top === p0.top && p1.w > p0.w && (await pct()) === z0, `${JSON.stringify(p0)} → ${JSON.stringify(p1)}`)
+  if (SHOT_DIR) await p.locator('.ax-stage-wrap').screenshot({ path: SHOT_DIR + '/s9/stage13_off_paper.png' })
+
+  // **한 장에 전부 담긴다** — 쪽 목록 그림 · 내보내기 노드 · 발표. 두 상자의 경계가 모두 그 장 안에 있어야 한다.
+  const allInside = (rootSel) => p.evaluate((sel) => Array.from(document.querySelectorAll(sel)).map((root) => {
+    const r = root.getBoundingClientRect()
+    const fs = Array.from(root.querySelectorAll('.fel')).map((n) => n.getBoundingClientRect())
+    return { n: fs.length, ok: fs.every((f) => f.left >= r.left - 0.5 && f.top >= r.top - 0.5 && f.right <= r.right + 0.5 && f.bottom <= r.bottom + 0.5) }
+  }).filter((v) => v.n > 0), rootSel)
+  const film = await allInside('.axth.on .axth-mini')
+  ok('[한 장에] **쪽 목록 그림**에 두 상자가 모두 들어 있다(줄여 담김)', film.length === 1 && film[0].n === 2 && film[0].ok, JSON.stringify(film))
+  const exp = await allInside('[id^="export-page-"]')
+  ok('[한 장에] **내보내기(이북 PNG · PDF)** 장에 두 상자가 모두 들어 있다', exp.length === 1 && exp[0].n === 2 && exp[0].ok, JSON.stringify(exp))
+  if (SHOT_DIR) await p.locator('.axth.on').screenshot({ path: SHOT_DIR + '/s9/stage13_film_shrunk.png' })
+
+  // 확대는 그대로 있다
+  await deselect()
+  await p.locator('.pv-zoom button', { hasText: '+' }).first().click(); await p.waitForTimeout(250)
+  ok('[작업면] 확대(+)가 그대로 듣는다', (await pct()) > z0, `${z0}% → ${await pct()}%`)
+  await p.locator('.pv-zoom .fitb').click(); await p.waitForTimeout(250)
+  ok('[작업면] 「맞춤」 이 처음 배율로 되돌린다', (await pct()) === z0, `${await pct()}%`)
+
+  // 발표는 종이에서 자른다(이북과 같게)
+  await p.keyboard.press('F5'); await p.waitForTimeout(400)
+  const pres = await allInside('.present .ptrans > div')
+  ok('[한 장에] **발표**에도 두 상자가 모두 보인다(잘리지 않고 줄여 담김)', pres.length === 1 && pres[0].n === 2 && pres[0].ok, JSON.stringify(pres))
+  if (SHOT_DIR) await p.screenshot({ path: SHOT_DIR + '/s9/stage13_present.png' })
+  await p.keyboard.press('Escape'); await p.waitForTimeout(300)
+
+  // ── 알마인드식 가지 키 ──
+  await deselect()
+  await layer().locator('.fel').first().click(); await p.waitForTimeout(200)
+  await p.keyboard.press('Space'); await p.waitForTimeout(450)
+  ok('[가지 키] Space = 자식 — 상자가 하나 는다(2 → 3)', (await layer().locator('.fel').count()) === 3, String(await layer().locator('.fel').count()))
+  ok('[가지 키] 붙이자마자 **글을 친다**(글칸에 초점)', await p.evaluate(() => !!document.activeElement && document.activeElement.isContentEditable))
+  ok('[가지 키] 붙이면 묶음이 **기준 크기 안에 다시 앉는다**', await inPaper(), JSON.stringify(await spots()))
+  const s2 = await st()
+  ok('[가지 키] 넘치는 것이 없어지니 슬라이드가 제 크기로 돌아온다 — 막대도 · 안내도 없다', s2.ox === 'hidden' && s2.oy === 'hidden' && (await p.locator('.pv-out').count()) === 0, JSON.stringify(s2))
+  await p.keyboard.type('alpha'); await p.keyboard.press('Enter'); await p.waitForTimeout(300)
+  ok('[가지 키] 글칸의 Enter = 글 끝내기(저장) — 줄을 나누지 않는다',
+    (await layer().locator('.fel', { hasText: 'alpha' }).count()) === 1 && !(await p.evaluate(() => !!document.activeElement && document.activeElement.isContentEditable)))
+  await p.keyboard.press('Enter'); await p.waitForTimeout(450)
+  ok('[가지 키] 이어서 Enter = 형제(3 → 4)', (await layer().locator('.fel').count()) === 4, String(await layer().locator('.fel').count()))
+  await p.keyboard.type('beta'); await p.keyboard.press('Enter'); await p.waitForTimeout(300)
+  const ya = (await layer().locator('.fel', { hasText: 'alpha' }).evaluate((n) => parseFloat(n.style.top)))
+  const yb = (await layer().locator('.fel', { hasText: 'beta' }).evaluate((n) => parseFloat(n.style.top)))
+  ok('[가지 키] 형제는 고른 상자 **바로 아래**에 앉는다', yb > ya, `alpha ${ya} · beta ${yb}`)
+  await p.keyboard.press('Shift+Enter'); await p.waitForTimeout(450)
+  await p.keyboard.type('mid'); await p.keyboard.press('Enter'); await p.waitForTimeout(300)
+  const ym = (await layer().locator('.fel', { hasText: 'mid' }).evaluate((n) => parseFloat(n.style.top)))
+  const yb2 = (await layer().locator('.fel', { hasText: 'beta' }).evaluate((n) => parseFloat(n.style.top)))
+  ok('[가지 키] Shift+Enter = 앞 형제 — alpha · mid · beta 순', ya < ym && ym < yb2, `alpha ${ya} · mid ${ym} · beta ${yb2}`)
+  ok('[가지 키] 다섯 상자가 모두 종이 안 · 겹침 없음', (await inPaper()) && await (async () => {
+    const v = await spots(); for (let i = 0; i < v.length; i++) for (let j = i + 1; j < v.length; j++) {
+      const a = v[i], b2 = v[j]; if (a[0] < b2[0] + b2[2] && b2[0] < a[0] + a[2] && a[1] < b2[1] + b2[3] && b2[1] < a[1] + a[3]) return false }
+    return true })(), JSON.stringify(await spots()))
+  if (SHOT_DIR) await p.locator('.ax-stage-wrap').screenshot({ path: SHOT_DIR + '/s9/stage13_mind_keys.png' })
+
+  // 방향키 = 토픽 이동(고른 상자가 바뀌고 자리는 그대로) · Alt+방향키 = 1px
+  const selText = () => p.locator('.stage .fel.sel').first().innerText().catch(() => '')
+  const before = await spots()
+  await p.keyboard.press('ArrowDown'); await p.waitForTimeout(200)
+  ok('[가지 키] ↓ = 다음 형제(mid → beta)로 **고른 것이 옮겨 간다**', (await selText()).trim() === 'beta', await selText())
+  await p.keyboard.press('ArrowLeft'); await p.waitForTimeout(200)
+  ok('[가지 키] ← = 부모로', (await selText()).trim() !== 'beta' && (await selText()).trim() !== '', await selText())
+  ok('[가지 키] 방향키로는 **상자가 움직이지 않는다**', JSON.stringify(await spots()) === JSON.stringify(before))
+  // 첫 자식은 파란 ＋ 점으로 먼저 붙인 상자(맨 윗줄)다. 거기서 ↓ 가 alpha.
+  await p.keyboard.press('ArrowRight'); await p.waitForTimeout(200)
+  const selTop = await p.locator('.stage .fel.sel').first().evaluate((n) => parseFloat(n.style.top)).catch(() => -1)
+  ok('[가지 키] → = **첫 자식**(맨 윗줄 상자)', selTop === Math.min(...before.filter((v) => v[0] > 24).map((v) => v[1])), String(selTop))
+  await p.keyboard.press('ArrowDown'); await p.waitForTimeout(200)
+  ok('[가지 키] ↓ = 그 아래 형제(alpha)', (await selText()).trim() === 'alpha', await selText())
+  await p.keyboard.press('Alt+ArrowRight'); await p.waitForTimeout(200)
+  const moved = await layer().locator('.fel', { hasText: 'alpha' }).evaluate((n) => parseFloat(n.style.left))
+  const was = before[(await layer().locator('.fel').evaluateAll((ns) => ns.findIndex((n) => n.textContent.trim() === 'alpha')))][0]
+  ok('[가지 키] Alt+→ = 1px 이동(예전 방향키)', moved === was + 1, `${was} → ${moved}`)
+
+  // Delete = 가지째 · ⌘Z 로 돌아온다
+  await p.keyboard.press('ArrowLeft'); await p.waitForTimeout(200)        // 부모(첫 상자)
+  const n0 = await layer().locator('.fel').count()
+  await p.keyboard.press('Delete'); await p.waitForTimeout(350)
+  ok('[가지 키] Delete = **가지째** 지운다(고른 상자 + 그 아래 전부)', (await layer().locator('.fel').count()) === 0, `${n0} → ${await layer().locator('.fel').count()}`)
+  await p.keyboard.press('ControlOrMeta+z'); await p.waitForTimeout(350)
+  ok('[가지 키] ⌘/Ctrl+Z 한 번으로 돌아온다', (await layer().locator('.fel').count()) === n0, String(await layer().locator('.fel').count()))
+
+  // **Space 가 확대/축소 단추를 누르던 것**(화면 기록 오후 5.10.16 — 배율이 100 → 80 → 64% 로 내려가 있었다).
+  // 배율 단추를 누르면 초점이 그 단추에 남고, 도형을 눌러도 초점은 안 옮겨 가서 Space 가 단추를 또 눌렀다.
+  await deselect()
+  await p.locator('.pv-zoom button', { hasText: '−' }).first().click(); await p.waitForTimeout(250)
+  const zA = await pct(), nA = await layer().locator('.fel').count()
+  await layer().locator('.fel', { hasText: 'beta' }).first().click(); await p.waitForTimeout(200)
+  await p.keyboard.press('Space'); await p.waitForTimeout(450)
+  ok('[가지 키] 배율 단추를 누른 뒤 도형을 고르고 Space — **배율은 그대로, 자식이 붙는다**',
+    (await pct()) === zA && (await layer().locator('.fel').count()) === nA + 1, `배율 ${zA}% → ${await pct()}% · 상자 ${nA} → ${await layer().locator('.fel').count()}`)
+  await p.keyboard.press('Enter'); await p.waitForTimeout(250)                   // 글 끝내기(고른 채로 남는다)
+  // 도형을 고른 채 배율 단추를 누르고 곧바로 Space — 단추가 초점을 가져가지 않는다.
+  await p.locator('.pv-zoom button', { hasText: '+' }).first().click(); await p.waitForTimeout(250)
+  const zB = await pct(), nB = await layer().locator('.fel').count()
+  await p.keyboard.press('Space'); await p.waitForTimeout(450)
+  ok('[가지 키] 도형을 고른 채 배율 단추를 누르고 바로 Space — 배율은 그대로, 자식이 붙는다',
+    (await pct()) === zB && (await layer().locator('.fel').count()) === nB + 1, `배율 ${zB}% → ${await pct()}% · 상자 ${nB} → ${await layer().locator('.fel').count()}`)
+  await p.keyboard.press('Escape'); await p.locator('.pv-zoom .fitb').click(); await p.waitForTimeout(200)
+}])
+
+// 2026-10-06 · 화면 기록 오후 5.10.16 — 자식 다섯 + 손자, 거기서 **넷째 단**. 가로 종이는 세 단까지라 아래 띠로 접히며
+// 위 띠와 포개졌다(흐린 상자가 끼어들고 상자가 겹침). 이제 포개지 않고 더 큰 슬라이드에 앉힌다(tree_keys.test.mjs 7번).
+STAGES.push(['13단계 · 넷째 단(영상의 그림)', async () => {
+  await freshBook()
+  await deselect()
+  await panel6().locator('.insp-row.seg button', { hasText: '가로' }).click(); await p.waitForTimeout(350)
+  const lb = await layer().boundingBox(); const z = lb.width / 640
+  await p.keyboard.press('r'); await p.mouse.click(lb.x + 120 * z, lb.y + 240 * z); await p.waitForTimeout(250)
+  const key = async (k, n = 1) => { for (let i = 0; i < n; i++) { await p.keyboard.press(k); await p.waitForTimeout(260) } }
+  await key('Space'); await key('Enter')                       // 자식 1 (글 끝내기)
+  for (let i = 0; i < 4; i++) { await key('Enter'); await key('Enter') }   // 형제 넷 → 자식 다섯
+  await key('ArrowUp', 4)                                      // 첫 자식으로
+  await key('Space'); await key('Enter')                       // 손자(셋째 단)
+  const spots = () => layer().locator('.fel').evaluateAll((ns) => ns.map((n) => [parseFloat(n.style.left), parseFloat(n.style.top), parseFloat(n.style.width), parseFloat(n.style.height)]))
+  const overlaps = (v) => { let n = 0; for (let i = 0; i < v.length; i++) for (let j = i + 1; j < v.length; j++) {
+    const a = v[i], b2 = v[j]; if (a[0] < b2[0] + b2[2] && b2[0] < a[0] + a[2] && a[1] < b2[1] + b2[3] && b2[1] < a[1] + a[3]) n++ } return n }
+  const v0 = await spots()
+  ok('[넷째 단] (준비) 뿌리 + 자식 다섯 + 손자 = 일곱 · 겹침 없음', v0.length === 7 && overlaps(v0) === 0, `${v0.length}개 · 겹친 쌍 ${overlaps(v0)}`)
+  await key('Space'); await key('Enter')                       // 넷째 단 — 영상에서 뒤엉킨 자리
+  const v1 = await spots()
+  ok('[넷째 단] 손자에 자식을 붙여도 **포개지지 않는다**(흐린 상자도 안 끼어든다)', v1.length === 8 && overlaps(v1) === 0, `${v1.length}개 · 겹친 쌍 ${overlaps(v1)} · ${JSON.stringify(v1.map((a) => [a[0], a[1]]))}`)
+  await key('Enter'); await key('Enter'); await key('Enter'); await key('Enter')   // 그 형제 둘
+  const v2 = await spots()
+  ok('[넷째 단] 거기에 형제를 더 붙여도 겹침 없음', v2.length === 10 && overlaps(v2) === 0, `${v2.length}개 · 겹친 쌍 ${overlaps(v2)}`)
+  const cap = (await p.locator('.pv-cap').innerText()).replace(/\s+/g, ' ')
+  ok('[넷째 단] 종이에 다 안 들어가면 슬라이드가 늘어난다 — 「줄여 담김」 안내', v2.some((a) => a[0] + a[2] > 640 || a[1] + a[3] > 482) && /줄여 담김/.test(cap), cap.slice(-30))
+  if (SHOT_DIR) { await deselect(); await p.locator('.ax-stage-wrap').screenshot({ path: SHOT_DIR + '/s9/stage13_fourth_level.png' }); await p.locator('.axth.on').screenshot({ path: SHOT_DIR + '/s9/stage13_fourth_level_film.png' }) }
 }])
 
 // ONLY=5단계 처럼 주면 그 이름이 든 단계만 돈다(고치는 동안 빨리 돌리려고). 비우면 전부.

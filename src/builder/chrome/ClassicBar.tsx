@@ -150,7 +150,7 @@ const ClassicBar = forwardRef<ClassicBarHandle, { onSettings: () => void; onDemo
       if (preview.irTheme) setTheme(preview.irTheme)
       setStatus('가져옴: ' + preview.name)
       setPreview(null)
-      // 가져온 HTML은 '새 이북'으로 라이브러리에 추가(현재 이북 덮어쓰지 않음).
+      // 가져온 HTML은 '스케치'으로 라이브러리에 추가(현재 이북 덮어쓰지 않음).
       useProjects.getState().adoptCurrentAsNewProject().catch((e) => {
         setStatus('라이브러리 추가 실패: ' + (e instanceof Error ? e.message : String(e)))
       })

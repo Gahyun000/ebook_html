@@ -33,6 +33,7 @@ interface KeyLike {
   key: string
   metaKey: boolean
   ctrlKey: boolean
+  altKey?: boolean
   target: { tagName?: string; isContentEditable?: boolean } | null | EventTarget
 }
 
@@ -42,6 +43,8 @@ interface KeyLike {
  */
 export function zoomKey(e: KeyLike): 'in' | 'out' | 'fit' | null {
   if (!(e.metaKey || e.ctrlKey)) return null
+  // Alt 가 붙으면 배율 키가 아니다 — Alt 조합은 가지 접기 · 펴기가 쓴다(mindKeys).
+  if (e.altKey) return null
   const t = e.target as { tagName?: string; isContentEditable?: boolean } | null
   if (t && (t.isContentEditable || t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return null
   if (e.key === '=' || e.key === '+') return 'in'

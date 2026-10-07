@@ -95,10 +95,10 @@ export const useProjects = create<ProjectsState>((set, get) => ({
     try {
       const p = await apiCreateProject('제목 없음', emptySnapshot())
       applyProject(p)
-      // 새 이북은 빈 슬라이드 한 장으로 시작(구글 슬라이드식). 추가가 자동저장을 유발한다.
+      // 스케치은 빈 슬라이드 한 장으로 시작(구글 슬라이드식). 추가가 자동저장을 유발한다.
       useBuilder.getState().addCard('slide')
       // **첫 장은 되돌릴 일이 아니다.** applyProject 가 이력을 비운 **뒤에** addCard 가 쪽 추가를
-      // 문서 이력에 쌓아서, 새 이북을 열자마자 ⌘Z 를 누르면 첫 빈 슬라이드가 지워졌다.
+      // 문서 이력에 쌓아서, 스케치을 열자마자 ⌘Z 를 누르면 첫 빈 슬라이드가 지워졌다.
       // 시작 상태를 다 만든 다음에 한 번 더 비운다.
       resetHistory()
       await get().loadList()
@@ -107,7 +107,7 @@ export const useProjects = create<ProjectsState>((set, get) => ({
     }
   },
 
-  // 지금 캔버스 내용(예: 방금 가져온 HTML)을 '새 이북'으로 라이브러리에 추가하고 그걸로 전환.
+  // 지금 캔버스 내용(예: 방금 가져온 HTML)을 '스케치'으로 라이브러리에 추가하고 그걸로 전환.
   // 현재 이북은 덮어쓰지 않는다(대기 중 자동저장 취소 후 새 id로 전환).
   adoptCurrentAsNewProject: async () => {
     cancelPendingSave()

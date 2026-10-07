@@ -71,7 +71,10 @@ export default function Present({ open, onClose }: { open: boolean; onClose: () 
       <style>{TRANS_CSS}</style>
       <div style={{ transform: 'scale(' + scale + ')', transformOrigin: 'center', cursor: 'pointer' }} onClick={() => setIdx((i) => Math.min(pages.length - 1, i + 1))}>
         <div key={clamped} className={'ptrans trans-' + (page.trans || 'none')}>
-          <PageWithCanvas page={page} docTitle={title} orientation={orientation} size={size} font={font} tocItems={items} interactive={false} />
+          {/* **종이에서 자른다** — 이북 · PDF 와 같게. 종이 밖 도형은 편집 화면에서만 보인다. */}
+          <div style={{ width: W, height: H, overflow: 'hidden' }}>
+            <PageWithCanvas page={page} docTitle={title} orientation={orientation} size={size} font={font} tocItems={items} interactive={false} />
+          </div>
         </div>
       </div>
       <div className="pnav">
