@@ -1,5 +1,5 @@
 import type React from 'react'
-import { Fragment, useState, useEffect, useRef } from 'react'
+import { Fragment, useState, useEffect, useMemo, useRef } from 'react'
 import { flushSync } from 'react-dom'
 import { selectWordOrCaretAtPoint } from '../lib/wordSelect'
 import { isComposingKey } from '../lib/ime'
@@ -8,20 +8,23 @@ import type { CSSProperties } from 'react'
 import type { Page, FreeEl } from '../state/store'
 import { useBuilder } from '../state/store'
 import { useCanvasUI } from '../state/canvasUI'
-import { mkFreeEl, pushSnap, FCOLORS, NO_FILL } from './model'
-import { centerSpot } from './dropSpot'
+import type { Tool } from '../state/canvasUI'
+import { mkFreeEl, pushSnap, NO_CPT } from './model'
+import { edgePoint, connPath } from './connPath'
+import type { Pt } from './connPath'
 import { CLIPPED, SHAPE_RADIUS, dashArray, polyClip, polyPoints } from './shapePaths'
 import { overlayOpen } from '../ui/overlay'
 import NoteBlocks from '../builder/NoteBlocks'
 import { bandRange, coveredSet, dragTrack, growToMerges, mergeCovering, sizeTracks, trackSizes } from './tableOps'
 import { cellBackground, cellTextColor } from './cellColor'
-import ColorPicker from '../builder/chrome/ColorPicker'
-import { treeShape, descendantCount, knownOf, isTreePage } from '../cards/treeOps'
+import { treeShape, descendantCount, knownOf, isTreePage, TREE_CONN } from '../cards/treeOps'
 import { mindKey, navTarget } from '../builder/mindKeys'
-import { addTopic } from '../builder/mindActions'
+import { addNext } from '../builder/mindActions'
 
 interface Props { page: Page; W: number; H: number; SC: number; interactive: boolean }
 const ADDABLE = ['box', 'round', 'ellipse', 'diamond', 'triangle', 'hexagon', 'pentagon', 'parallelogram', 'chevron', 'arrowR', 'arrowL', 'arrowU', 'arrowD', 'star5', 'star4', 'banner', 'callout', 'text', 'sticky', 'image', 'icon', 'table', 'wordart', 'note']
+/** ＋점의 변 → 붙이는 쪽(placeNext.Side). 오른쪽 점 = Space 와 같고, 아래 점 = Enter 와 같다. */
+const SIDE = { r: 'right', b: 'down', t: 'up', l: 'left' } as const
 // 도구별 커서 — 펜=펜촉, 형광펜=마커(핫스팟은 팁), 지우개=크기 반영 원형(핫스팟 중앙).
 const PEN_SVG = "<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='#2462eb' stroke='#ffffff' stroke-width='1.3' stroke-linejoin='round'><path d='M17 3a2.8 2.8 0 0 1 4 4L7.5 20.5 2 22l1.5-5.5Z'/></svg>"
 const HL_SVG = "<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='#8a6d00' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><path d='m9 11-6 6v3h9l3-3'/><path d='m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4Z' fill='#ffd600'/></svg>"
@@ -32,49 +35,7 @@ function eraserCur(w: number): string {
   const svg = "<svg xmlns='http://www.w3.org/2000/svg' width='" + s + "' height='" + s + "'><circle cx='" + h + "' cy='" + h + "' r='" + (d / 2) + "' fill='rgba(120,124,134,0.18)' stroke='#555' stroke-width='1.5'/></svg>"
   return 'url("data:image/svg+xml,' + encodeURIComponent(svg) + '") ' + h + ' ' + h + ', crosshair'
 }
-interface Pt { x: number; y: number }
-
-function edgePoint(box: FreeEl, tx: number, ty: number): Pt {
-  const cx = box.x + box.w / 2, cy = box.y + box.h / 2
-  const dx = tx - cx, dy = ty - cy
-  if (dx === 0 && dy === 0) return { x: cx, y: cy }
-  const scale = 1 / Math.max(Math.abs(dx) / (box.w / 2), Math.abs(dy) / (box.h / 2))
-  return { x: cx + dx * scale, y: cy + dy * scale }
-}
-function connPath(a: FreeEl, b: FreeEl, conn?: { kind?: 'straight' | 'ortho' | 'curve'; bend?: Pt }): string {
-  const kind = conn?.kind || 'ortho'
-  const bend = conn?.bend
-  const ac = { x: a.x + a.w / 2, y: a.y + a.h / 2 }, bc = { x: b.x + b.w / 2, y: b.y + b.h / 2 }
-  if (kind === 'straight') {
-    const s = edgePoint(a, bc.x, bc.y), t = edgePoint(b, ac.x, ac.y)
-    return 'M ' + s.x + ' ' + s.y + ' L ' + t.x + ' ' + t.y
-  }
-  if (kind === 'curve') {
-    const s = edgePoint(a, bc.x, bc.y), t = edgePoint(b, ac.x, ac.y)
-    let cx: number, cy: number
-    if (bend) { cx = bend.x; cy = bend.y }
-    else {
-      const mx = (s.x + t.x) / 2, my = (s.y + t.y) / 2, dx = t.x - s.x, dy = t.y - s.y, len = Math.hypot(dx, dy) || 1
-      const off = Math.min(70, len * 0.28)
-      cx = mx - dy / len * off; cy = my + dx / len * off
-    }
-    return 'M ' + s.x + ' ' + s.y + ' Q ' + cx + ' ' + cy + ' ' + t.x + ' ' + t.y
-  }
-  // ortho (직각) — bend가 있으면 그 지점을 지나는 꺾은선
-  if (bend) {
-    const s = edgePoint(a, bend.x, bend.y), t = edgePoint(b, bend.x, bend.y)
-    return 'M ' + s.x + ' ' + s.y + ' L ' + bend.x + ' ' + bend.y + ' L ' + t.x + ' ' + t.y
-  }
-  const dx = bc.x - ac.x, dy = bc.y - ac.y
-  if (Math.abs(dx) >= Math.abs(dy)) {
-    const s = { x: dx > 0 ? a.x + a.w : a.x, y: ac.y }, t = { x: dx > 0 ? b.x : b.x + b.w, y: bc.y }
-    const mx = (s.x + t.x) / 2
-    return 'M ' + s.x + ' ' + s.y + ' L ' + mx + ' ' + s.y + ' L ' + mx + ' ' + t.y + ' L ' + t.x + ' ' + t.y
-  }
-  const s = { x: ac.x, y: dy > 0 ? a.y + a.h : a.y }, t = { x: bc.x, y: dy > 0 ? b.y : b.y + b.h }
-  const my = (s.y + t.y) / 2
-  return 'M ' + s.x + ' ' + s.y + ' L ' + s.x + ' ' + my + ' L ' + t.x + ' ' + my + ' L ' + t.x + ' ' + t.y
-}
+// 연결선의 길(edgePoint · connPath)은 ./connPath 로 옮겼다(2026-10-07) — 순수 함수라 노드에서 검사한다(conn_axis.test.mjs).
 
 // ③ 스마트 스냅: 모서리·중심·캔버스중앙 정렬 + 두 이웃 사이 등간격. 가이드 좌표(v/h)도 반환.
 function computeSnap(w: number, h: number, rawX: number, rawY: number, others: FreeEl[], CW: number, CH: number) {
@@ -129,7 +90,27 @@ export default function FreeLayer({ page, W, H, interactive }: Props) {
   const shownEls = hiddenIds.size ? page.els.filter((e) => !hiddenIds.has(e.id)) : page.els
   const shownConn = (c: { from: number; to: number }) => !hiddenIds.has(c.from) && !hiddenIds.has(c.to)
   const treeFold = useBuilder((st) => st.treeFold)
-  const tshape = interactive && isTreePage(page) ? treeShape(page.els, page.conns, knownOf(page)) : null
+  /**
+   * **트리 모양은 interactive 와 무관하게 읽는다**(2026-10-07 · 불편점 5번). 부모→자식 선의 축(axisOf)이 여기서 나오는데,
+   * 내보내기(interactive=false)에서 다르게 그리면 이북 PNG 의 선이 편집 화면과 달라진다. 호버 때마다 다시 그리므로 memo.
+   */
+  const tshapeAll = useMemo(
+    () => (page.mindmapCenter == null && isTreePage(page) ? treeShape(page.els, page.conns, knownOf(page)) : null),
+    [page.els, page.conns, page.treeRoots, page.treeRoot, page.mindmapCenter])
+  const tshape = interactive ? tshapeAll : null
+  /** 트리 부모→자식 선이면 성장 방향의 축 — 자식이 여럿 쌓여도 **늘 같은 변**에서 나간다(connPath). echo 는 원본으로 되돌려 본다. */
+  const axisOf = (c: { from: number; to: number; axis?: 'h' | 'v' }): 'h' | 'v' | undefined => {
+    if (c.axis) return c.axis                       // 붙일 때 적어 둔 변(2026-10-07 2차) — 재정렬이 없어도 늘 같은 변에서 나간다
+    if (!tshapeAll) return undefined
+    const org = (id: number) => { const e = page.els.find((x) => x.id === id); return e && e.echoOf != null ? e.echoOf : id }
+    return tshapeAll.parent.get(org(c.to)) === org(c.from) ? (page.treeDir === 'TD' ? 'v' : 'h') : undefined
+  }
+  /**
+   * **선으로 이어진 그림의 모양**(2026-10-07) — 접기 손잡이(불편점 10번)와 글칸의 Enter · 가지 키(2차 4번 「머메이드와 도형은 별개가 아님」)가 본다.
+   * 머메이드로 펼쳤든 키 · ＋점 · 「→ 연결」 로 이었든 같다. 마인드맵(방사형) 쪽은 제외.
+   */
+  const graphShape = interactive && page.mindmapCenter == null
+    ? (tshapeAll ?? (page.conns.length ? treeShape(page.els, page.conns, knownOf(page)) : null)) : null
 
   const tool = useCanvasUI((s) => s.tool)
   /**
@@ -205,6 +186,7 @@ export default function FreeLayer({ page, W, H, interactive }: Props) {
     const now = useBuilder.getState().pages.find((p) => p.id === page.id)
     if (now && snapOf(now) !== before) pushSnap(page.id, before)
   }
+  // 글을 끝내도 고른 것은 그 상자다(알마인드 · 3차) — 이어서 Enter 면 그 상자의 형제, Space 면 자식. (2차의 「허브로 돌아오기」 는 뺐다.)
   function endEditing() { commitEditing(); setEditing(null) }
   // 더블클릭한 화면 좌표. 편집을 켠 뒤 그 자리에 커서를 놓는 데 쓴다 —
   // contentEditable 은 다음 렌더에야 켜지므로 브라우저가 놓아 준 커서는 남지 않는다.
@@ -241,7 +223,13 @@ export default function FreeLayer({ page, W, H, interactive }: Props) {
     const onKey = (e: KeyboardEvent) => {
       // **위가 덮여 있으면 아래는 키를 안 건드린다**(EVER-SKETCH1 bab224b · ui/overlay 참고).
       if (overlayOpen()) return
-      if (e.key === 'Escape') { setSel(null); setConnSrc(null); setSelConn(null); endEditing(); setMarquee(null); setTool('select'); return }
+      if (e.key === 'Escape') {
+        // **글을 고치는 중이면 편집만 끝내고 상자는 고른 채 둔다**(2026-10-07 · EverSketch 불편점 1번). 전에는 선택까지 풀려서
+        // 「도형을 만든 직후 빠져나오려면 다른 곳을 눌러야」 했다. 한 번 더 누르면 아래 줄(선택 해제 · 도구 취소)로 간다.
+        // 한글 조합을 끊는 Esc 는 입력기 몫이다(lib/ime 와 같은 판정 — 창에 직접 단 리스너라 네이티브 값을 본다).
+        const ed = connKeyRef.current.editing; if (ed != null) { if (e.isComposing) return; pristineRef.current = null; endEditing(); setSel(ed); return }
+        setSel(null); setConnSrc(null); setSelConn(null); endEditing(); setMarquee(null); setTool('select'); return
+      }
       if (e.key === 'Delete' || e.key === 'Backspace') {
         const st = connKeyRef.current
         if (st.selConn == null || st.editing != null) return
@@ -272,15 +260,14 @@ export default function FreeLayer({ page, W, H, interactive }: Props) {
   })
 
   /**
-   * **고르면 곧바로 놓인다**(EVER-SKETCH1 e4dfbfd 도형 · 90e7439 글상자·표·글맵시).
+   * **고르면 무장 → 빈 곳을 찍으면 그 자리에**(2026-10-07 · EverSketch 불편점 6번 · 사용자 결정: 텍스트·표·글맵시까지 전부).
    *
-   * 바로 위 '삽입 → 이미지' 와 **같은 까닭, 같은 방식**이다 — 「도구만 켜두면 한 번 더 클릭해야
-   * 하는 걸 모르는 사람이 아무 반응 없다고 느낀다」. 자리는 `centerSpot` 이 정한다(한가운데,
-   * 이미 차 있으면 16px 씩 비껴서).
+   * 지난 결정(EVER-SKETCH1 e4dfbfd 도형 · 90e7439 글상자·표·글맵시)은 「고르면 곧바로 한가운데에 놓는다」 였다 — 「도구만 켜두면
+   * 한 번 더 클릭해야 하는 걸 모르는 사람이 아무 반응 없다고 느낀다」 는 까닭이었다. 사용자가 뒤집었다: 「메뉴바에서 도형을 클릭하면
+   * 바로 도형이 생겨버림 → 도형을 클릭 후 마우스로 사용자가 화면에 찍으면 그 곳에 생기도록」. 그 걱정은 **안내 띠**(conn-hint)가 맡는다.
    *
-   * **놓는 규칙은 여기 한 곳에만 둔다.** 도구줄·메뉴가 직접 `addEl` 을 부르면 캔버스 밖에서
-   * 요소가 생기는 길이 하나 더 생기고, 그 길은 되돌리기(snap)를 안 거친다.
-   * **클릭해서 놓는 길은 그대로 남긴다** — 단축키(r·o·d)로 든 도형은 자리를 정확히 찍는다.
+   * **놓는 규칙은 여전히 한 곳**(onLayerDown · 찍은 점이 상자 가운데) — 도구줄·메뉴는 그대로 이 이벤트를 쏘고, 무장은 여기서 한다.
+   * 단축키(r·o·d·t)와 같은 길이다. 되돌리기(snap)도 그 한 곳에서 남는다.
    */
   useEffect(() => {
     if (!interactive) return
@@ -289,20 +276,31 @@ export default function FreeLayer({ page, W, H, interactive }: Props) {
       // 모르는 이름이 오면 **아무 일도 하지 않는다.** mkFreeEl 은 모르는 갈래를
       // 조용히 네모(DEFS.box)로 바꾸므로, 안 막으면 오타가 네모로 둔갑해서 나온다.
       if (!type || ADDABLE.indexOf(type) < 0) return
-      const el = mkFreeEl(type, 0, 0)
-      const at = centerSpot(page.els, el.w, el.h, W, H)
-      el.x = at.x; el.y = at.y
-      snap()
-      addEl(page.id, el)
-      setSel(el.id)
-      setTool('select')
-      // **글을 담는 것은 커서까지 넣어 준다**(90e7439). `startEditing` 을 좌표 없이 부르면
-      // 기본 글자가 **통째로 골라져서**, 그냥 치면 덮어써진다(키노트·파워포인트와 같은 손놀림).
-      // 표는 넣지 않는다 — 칸이 여럿이라 어느 칸일지 정할 수 없다.
-      if (type === 'text' || type === 'wordart') startEditing(el.id)
+      // 무장만 한다 — 같은 것을 또 고르면 내려놓는다. 놓는 일은 onLayerDown(빈 곳을 찍은 자리)이 한다.
+      const cur = useCanvasUI.getState().tool; setTool(cur === type ? 'select' : type as Tool)
     }
     window.addEventListener('ebook:place', onPlace)
     return () => window.removeEventListener('ebook:place', onPlace)
+  })
+
+  // 작업면(종이 밖)에서 시작한 끌어 고르기 — Preview 가 화면 좌표를 넘긴다(2026-10-07 · 불편점 4번).
+  useEffect(() => {
+    if (!interactive) return
+    const onMarquee = (ev: Event) => {
+      const d = (ev as CustomEvent<{ x: number; y: number }>).detail
+      if (!d || useCanvasUI.getState().tool !== 'select') return
+      beginMarquee(d.x, d.y)
+    }
+    window.addEventListener('ebook:marquee', onMarquee)
+    return () => window.removeEventListener('ebook:marquee', onMarquee)
+  })
+
+  // 도구줄의 「이 도형에서 연결」(2026-10-07 2차 3번 — 떠 있던 서식 막대를 도구줄로 옮겼다). 고른 도형에서 연결 모드를 시작한다.
+  useEffect(() => {
+    if (!interactive) return
+    const onFrom = () => { const id = useCanvasUI.getState().selEl; if (id != null && page.els.some((e) => e.id === id)) startConnectFrom(id) }
+    window.addEventListener('ebook:connect-from', onFrom)
+    return () => window.removeEventListener('ebook:connect-from', onFrom)
   })
 
   // 편집 중일 때, 편집 중인 요소 "밖"을 누르면 값을 저장하고 편집을 끝낸다.
@@ -463,13 +461,7 @@ export default function FreeLayer({ page, W, H, interactive }: Props) {
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
   })
-  const emit = (n: string) => window.dispatchEvent(new CustomEvent(n))
-  // 연결점(마우스를 올리면 나오는 파란 점 4개)을 안 띄우는 타입.
-  // **표(table)도 넣었다**(EVER-SKETCH1 824ec0e). 표에 점이 붙으면 칸을 잡으려다 선이 그어진다.
-  // 표끼리 이을 일은 드물고, 정말 필요하면 「→ 연결」로 이을 수 있다.
-  const NO_CPT = ['text', 'icon', 'wordart', 'note', 'table']
-  // 채우기색 안 쓰는 타입(NO_FILL)은 model.ts 한 곳에서 온다 — 도구줄과 같은 목록(EVER-SKETCH1 b1911d3).
-  function setFill(el: FreeEl, c: string) { snap(); updateEl(page.id, el.id, { color: c }) }
+  // 연결점을 안 띄우는 갈래(NO_CPT)는 model.ts 한 곳에서 온다 — 도구줄 · 머메이드 뽑기와 같은 목록.
   function startConnectFrom(id: number) { setSelConn(null); setConnSrc(id); setTool('connect') }
   // 그룹이면 그 그룹 전체 id, 아니면 자기 id
   function expandGroupIds(id: number): number[] {
@@ -548,6 +540,36 @@ export default function FreeLayer({ page, W, H, interactive }: Props) {
     window.addEventListener('pointerup', up)
   }
 
+  /**
+   * **끌어 고르기**(마퀴). 종이 안 빈 곳(onLayerDown)에서도, **종이 밖 회색 작업면**(Preview 가 `ebook:marquee` 로 넘김 ·
+   * 2026-10-07 · 불편점 4번)에서도 같은 길이다. 화면 좌표를 받아 레이어 좌표로 바꾼다 — 종이 밖에서 시작하면 음수가 나오지만 상관없다.
+   */
+  function beginMarquee(clientX: number, clientY: number) {
+    const node = layerRef.current
+    if (!node) return
+    const rect = node.getBoundingClientRect()
+    const z = zoomOf(rect)
+    const x = (clientX - rect.left) / z, y = (clientY - rect.top) / z
+    setSel(null); setConnSrc(null); setSelConn(null); endEditing()
+    const s0 = { x, y }
+    setMarquee({ x, y, w: 0, h: 0 })
+    const mv = (ev: PointerEvent) => { const cx = (ev.clientX - rect.left) / z, cy = (ev.clientY - rect.top) / z; setMarquee({ x: Math.min(s0.x, cx), y: Math.min(s0.y, cy), w: Math.abs(cx - s0.x), h: Math.abs(cy - s0.y) }) }
+    const up = (ev: PointerEvent) => {
+      window.removeEventListener('pointermove', mv); window.removeEventListener('pointerup', up)
+      const cx = (ev.clientX - rect.left) / z, cy = (ev.clientY - rect.top) / z
+      const mx = Math.min(s0.x, cx), my = Math.min(s0.y, cy), mw = Math.abs(cx - s0.x), mh = Math.abs(cy - s0.y)
+      setMarquee(null)
+      // 가로 · 세로 중 **하나만** 4px 넘으면 고른다(2026-10-07 · 「어디서든 드래그」). 납작하게 가로로만 끌어도 지나간 상자가 골라진다.
+      if (mw > 4 || mh > 4) {
+        const hit = page.els.filter((e2) => e2.x < mx + mw && e2.x + e2.w > mx && e2.y < my + mh && e2.y + e2.h > my).map((e2) => e2.id)
+        const ids = new Set<number>()
+        for (const id of hit) for (const g of expandGroupIds(id)) ids.add(g)
+        if (ids.size) setSelMany([...ids])
+      }
+    }
+    window.addEventListener('pointermove', mv); window.addEventListener('pointerup', up)
+  }
+
   function onLayerDown(e: React.PointerEvent<HTMLDivElement>) {
     if (!active) return
     // 이 줄은 원래 **요소를 끌 때 마퀴 선택이 같이 시작되는 것**을 막으려고 있다.
@@ -585,27 +607,16 @@ export default function FreeLayer({ page, W, H, interactive }: Props) {
     }
     // stopPropagation 이 없으면 부모(PageWithCanvas)의 onPointerDown 이 곧바로 setSel(null) 로 덮어써서
     // 방금 그린 도형에 핸들·서식 바가 안 뜨고 Delete 도 안 먹는다.
-    if (ADDABLE.indexOf(tool) >= 0) { e.stopPropagation(); snap(); const el = mkFreeEl(tool, x - 50, y - 25); addEl(page.id, el); setSel(el.id); setTool('select'); if (tool === 'image') pickImage(el, true); if (tool === 'note') startEditing(el.id); return }
-    if (tool === 'select') {
-      setSel(null); setConnSrc(null); setSelConn(null); endEditing()
-      const s0 = { x, y }
-      setMarquee({ x, y, w: 0, h: 0 })
-      const mv = (ev: PointerEvent) => { const cx = (ev.clientX - rect.left) / z, cy = (ev.clientY - rect.top) / z; setMarquee({ x: Math.min(s0.x, cx), y: Math.min(s0.y, cy), w: Math.abs(cx - s0.x), h: Math.abs(cy - s0.y) }) }
-      const up = (ev: PointerEvent) => {
-        window.removeEventListener('pointermove', mv); window.removeEventListener('pointerup', up)
-        const cx = (ev.clientX - rect.left) / z, cy = (ev.clientY - rect.top) / z
-        const mx = Math.min(s0.x, cx), my = Math.min(s0.y, cy), mw = Math.abs(cx - s0.x), mh = Math.abs(cy - s0.y)
-        setMarquee(null)
-        if (mw > 4 && mh > 4) {
-          const hit = page.els.filter((e2) => e2.x < mx + mw && e2.x + e2.w > mx && e2.y < my + mh && e2.y + e2.h > my).map((e2) => e2.id)
-          const ids = new Set<number>()
-          for (const id of hit) for (const g of expandGroupIds(id)) ids.add(g)
-          if (ids.size) setSelMany([...ids])
-        }
-      }
-      window.addEventListener('pointermove', mv); window.addEventListener('pointerup', up); return
-    }
+    // **찍은 점이 상자의 가운데**(2026-10-07 · 불편점 6번 · 종이 왼쪽 · 위로는 안 나간다). 글을 담는 것(글상자 · 글맵시 · 메모)은
+    // 커서까지 — 좌표 없이 열어 기본 글자가 통째로 골라진다(90e7439 의 손놀림). 표는 칸이 여럿이라 커서를 안 넣는다.
+    // `preventDefault` 가 없으면 **방금 연 글칸의 초점을 브라우저가 도로 뺏는다** — pointerdown 안에서 글칸이 초점을 받은 뒤 mousedown 의
+    // 기본 동작(누른 곳으로 초점 이동)이 body 로 돌려놓아 onBlur 가 편집을 끝냈다(2026-10-07 화면 확인 · 요소를 끄는 갈래와 같은 처리).
+    if (ADDABLE.indexOf(tool) >= 0) { e.stopPropagation(); snap(); e.preventDefault(); const el = mkFreeEl(tool, 0, 0); el.x = Math.max(0, Math.round(x - el.w / 2)); el.y = Math.max(0, Math.round(y - el.h / 2)); addEl(page.id, el); setSel(el.id); setTool('select'); if (tool === 'image') pickImage(el, true); if (tool === 'text' || tool === 'wordart' || tool === 'note') startEditing(el.id); return }
+    if (tool === 'select') { beginMarquee(e.clientX, e.clientY); return }
+    // 연결 도구로 빈 곳을 눌렀다 — **모드도 푼다**(2026-10-07 · 불편점 7번). 전에는 첫 상자만 풀리고 「이을 도형을 클릭하세요」 가
+    // 그대로 남아 「무조건 다른 도형을 찍어야 하는」 꼴이었다. Esc 와 같은 결과다.
     setSel(null); setConnSrc(null); endEditing()
+    if (tool === 'connect') setTool('select')
   }
   function onLayerMove(e: React.PointerEvent<HTMLDivElement>) {
     if (!active || tool !== 'connect' || connSrc === null) { if (mouse) setMouse(null); return }
@@ -618,7 +629,7 @@ export default function FreeLayer({ page, W, H, interactive }: Props) {
     if (tool === 'connect') {
       e.preventDefault(); e.stopPropagation()
       if (connSrc === null) setConnSrc(el.id)
-      else if (connSrc !== el.id) { snap(); addConn(page.id, { from: connSrc, to: el.id }); setConnSrc(null); setMouse(null); setTool('select') }
+      else if (connSrc !== el.id) { snap(); addConn(page.id, { from: connSrc, to: el.id, ...TREE_CONN }); setConnSrc(null); setMouse(null); setTool('select') }
       return
     }
     if (tool === 'pen' || tool === 'highlighter' || tool === 'eraser') { e.stopPropagation(); return }
@@ -814,20 +825,23 @@ export default function FreeLayer({ page, W, H, interactive }: Props) {
       setNodeDrag(null)
       const x = (ev.clientX - rect.left) / z, y = (ev.clientY - rect.top) / z
       const target = page.els.find((t) => t.id !== el.id && x >= t.x && x <= t.x + t.w && y >= t.y && y <= t.y + t.h)
+      // **끌었나**는 포인터 이동량으로 본다(2026-10-07). 전에는 상자 중심에서 40px 안이면 「누르기만」 이었는데, 가로 120 상자의
+      // 좌우 점은 중심에서 60 이라 누르기만 해도 「끈 것」 이 되어 그 자리에 포개진 상자가 생겼다.
+      const moved = Math.hypot(ev.clientX - e.clientX, ev.clientY - e.clientY) > 6
+      const tid = el.echoOf ?? el.id
+      // **누르기만** 하면 그 변 쪽에 붙인다(2026-10-07 · 1·8번 · 2차 5·6번) — Space · Enter 와 같은 자리 규칙(addNext → treeAdd → nextSpot ·
+      // 재정렬 없음). 어느 쪽(머메이드 · 손으로 그린 것)에서든 같다. 되돌리기는 addNext 가 남긴다.
+      if (!moved && !target) { addNext(page.id, tid, SIDE[dir]); return }
       snap()
-      if (target) { addConn(page.id, { from: el.id, to: target.id }); setSel(target.id); return }
-      const NW = 120, NH = 56
-      const far = Math.hypot(x - (el.x + el.w / 2), y - (el.y + el.h / 2)) > 40
-      let nx: number, ny: number
-      if (far) { nx = x - NW / 2; ny = y - NH / 2 }
-      else if (dir === 'r') { nx = el.x + el.w + 40; ny = el.y + (el.h - NH) / 2 }
-      else if (dir === 'l') { nx = el.x - NW - 40; ny = el.y + (el.h - NH) / 2 }
-      else if (dir === 'b') { nx = el.x + (el.w - NW) / 2; ny = el.y + el.h + 40 }
-      else { nx = el.x + (el.w - NW) / 2; ny = el.y - NH - 40 }
-      const nb = mkFreeEl('box', Math.max(0, Math.round(nx)), Math.max(0, Math.round(ny)))
+      if (target) { addConn(page.id, { from: el.id, to: target.id, ...TREE_CONN }); setSel(target.id); return }
+      const NW = el.w, NH = el.h
+      const nx = x - NW / 2, ny = y - NH / 2
+      // 끌어 놓은 새 상자도 고른 상자를 닮는다 — 모양 · 크기 · 색 · 글자(treeAdd 와 같은 규칙 · 2026-10-07).
+      const nb = mkFreeEl(el.type, Math.max(0, Math.round(nx)), Math.max(0, Math.round(ny)))
+      nb.w = el.w; nb.h = el.h; nb.color = el.color; nb.fs = el.fs; nb.tcolor = el.tcolor
       nb.text = ''
       addEl(page.id, nb)
-      addConn(page.id, { from: el.id, to: nb.id })
+      addConn(page.id, { from: el.id, to: nb.id, ...TREE_CONN })
       setSel(nb.id); startEditing(nb.id); setReveal(nb.id)
     }
     window.addEventListener('pointermove', move); window.addEventListener('pointerup', up)
@@ -835,6 +849,16 @@ export default function FreeLayer({ page, W, H, interactive }: Props) {
   function onLineDown(e: React.PointerEvent<SVGPathElement>, i: number) {
     if (!active) return
     e.preventDefault(); e.stopPropagation()
+    // **고르지 않은 선에서 끌면 끌어 고르기**(2026-10-07 · 사용자: 「도형이나 선을 선택하지 않은 이상 어디서든 드래그가 되도록」).
+    // 선의 누름 영역은 보이는 선보다 넓어서(16px) 빈 곳으로 보이는 데를 눌러도 선이 잡혀 **휘기**가 시작됐다 — 마인드맵처럼 선이 많으면
+    // 「되는 곳도 있고 안 되는 곳도 있음」 으로 보인다. 이제 누르기만 하면 그 선을 고르고, 끌면 끌어 고르기다. 휘기는 **고른 선**을 끌 때만.
+    if (selConn !== i) {
+      const sx = e.clientX, sy = e.clientY
+      beginMarquee(sx, sy)
+      const up = (ev: PointerEvent) => { window.removeEventListener('pointerup', up); if (Math.abs(ev.clientX - sx) + Math.abs(ev.clientY - sy) <= 4) setSelConn(i) }
+      window.addEventListener('pointerup', up)
+      return
+    }
     const svg = e.currentTarget.ownerSVGElement
     if (!svg) return
     const rect = svg.getBoundingClientRect(); const z = zoomOf(rect); let did = false, moved = false
@@ -853,7 +877,7 @@ export default function FreeLayer({ page, W, H, interactive }: Props) {
     if (!shownConn(c)) return null
     const a = page.els.find((e) => e.id === c.from); const b = page.els.find((e) => e.id === c.to)
     if (!a || !b) return null
-    const d = connPath(a, b, c)
+    const d = connPath(a, b, c, axisOf(c))
     const stroke = c.color || '#8b93a5'
     const w = c.width || 2
     const arrow = c.arrow || 'end'
@@ -871,7 +895,7 @@ export default function FreeLayer({ page, W, H, interactive }: Props) {
     if (!shownConn(c)) return null
     const a = page.els.find((e) => e.id === c.from); const b = page.els.find((e) => e.id === c.to)
     if (!a || !b) return null
-    return <path key={'hit' + i} d={connPath(a, b, c)} fill="none" stroke="transparent" strokeWidth={16} style={{ pointerEvents: 'stroke', cursor: 'pointer' }} onPointerDown={(e) => onLineDown(e, i)} />
+    return <path key={'hit' + i} d={connPath(a, b, c, axisOf(c))} fill="none" stroke="transparent" strokeWidth={16} style={{ pointerEvents: 'stroke', cursor: 'pointer' }} onPointerDown={(e) => onLineDown(e, i)} />
   }) : null
   const hlStrokes = page.strokes.map((st, i) => {
     if (!st.hl || st.points.length < 2) return null
@@ -912,7 +936,8 @@ export default function FreeLayer({ page, W, H, interactive }: Props) {
         {bending ? <circle cx={bending.x} cy={bending.y} r={6} fill="#fff" stroke="#8b93a5" strokeWidth={2} /> : null}
       </svg>
       {active && marquee ? <div className="marquee" style={{ left: marquee.x, top: marquee.y, width: marquee.w, height: marquee.h }} /> : null}
-      {active && tool === 'connect' ? <div className="conn-hint">{connSrc === null ? '이을 도형을 클릭하세요 (첫 번째)' : '이어줄 다른 도형을 클릭하세요 (두 번째)'}</div> : null}
+      {active && adding ? <div className="conn-hint">빈 곳을 눌러 놓을 자리를 정하세요 · Esc 취소</div> : null}
+      {active && tool === 'connect' ? <div className="conn-hint">{connSrc === null ? '이을 도형을 클릭하세요 (첫 번째) · Esc 취소' : '이어줄 다른 도형을 클릭하세요 (두 번째) · Esc 취소'}</div> : null}
       {shownEls.map((el) => {
         const isImg = el.type === 'image'
         const isTable = el.type === 'table'
@@ -1169,21 +1194,23 @@ export default function FreeLayer({ page, W, H, interactive }: Props) {
                       onKeyDown={(e) => {
                         if (isComposingKey(e)) return
                         const tid = el.echoOf ?? el.id
-                        if (!tshape || !tshape.members.includes(tid)) return
-                        // 붙인 뒤 아무것도 안 쳤으면 **가지 키가 그대로 듣는다** — Space 자식 · Enter 형제 · 방향키 옮겨 가기.
+                        // 선으로 이어진 상자(머메이드 · 키 · ＋점 가리지 않고 · 2차 4번)와 방금 키로 붙인 상자만 — 그 밖의 글상자는 Enter 가 줄바꿈이다.
+                        const inGraph = !!(graphShape && graphShape.members.includes(tid))
+                        if (!inGraph && pristineRef.current !== el.id) return
+                        // 붙인 뒤 아무것도 안 쳤으면 **가지 키가 그대로 듣는다**(알마인드) — Space 자식(오른쪽) · Enter 형제 · Shift+Enter 앞 형제, 방향키는 옮겨 가기.
                         if (pristineRef.current === el.id) {
                           const act = mindKey(e.nativeEvent)
                           if (act === 'child' || act === 'sibling' || act === 'before') {
                             e.preventDefault(); e.stopPropagation()
                             if (e.repeat) return
                             pristineRef.current = null
-                            endEditing(); addTopic(page.id, tid, act)
+                            endEditing(); addNext(page.id, tid, act === 'child' ? 'right' : act)
                             return
                           }
                           if (!e.shiftKey && !e.altKey && !e.metaKey && !e.ctrlKey && e.key.startsWith('Arrow')) {
                             e.preventDefault(); e.stopPropagation()
                             pristineRef.current = null
-                            const to = navTarget(tshape, page.treeDir || 'LR', tid, e.key)
+                            const to = tshape ? navTarget(tshape, page.treeDir || 'LR', tid, e.key) : null
                             endEditing()
                             if (to != null) { setSel(to); setReveal(to) }
                             return
@@ -1208,11 +1235,11 @@ export default function FreeLayer({ page, W, H, interactive }: Props) {
           자식이 있는 상자에만, 그리고 **편집 화면에서만** 나온다.
           접힌 상자 오른쪽의 「+N」은 **접어서 안 보이는 상자 수**다 — 몇 개를 덮었는지
           모르면 접은 걸 잊는다. */}
-      {tshape ? shownEls.map((el) => {
+      {graphShape ? shownEls.map((el) => {
         if (el.echoOf != null) return null
-        const kids = (tshape.kids.get(el.id) || []).length
+        const kids = (graphShape.kids.get(el.id) || []).length
         if (!kids) return null
-        const n = el.folded ? descendantCount(tshape, el.id) : 0
+        const n = el.folded ? descendantCount(graphShape, el.id) : 0
         return (
           <Fragment key={'fold' + el.id}>
             {/* **상자 왼쪽 아래 모서리**에 붙인다. 원본에서 화면을 보고 두 번 옮겼다 —
@@ -1224,7 +1251,7 @@ export default function FreeLayer({ page, W, H, interactive }: Props) {
               {el.folded ? '▸' : '▾'}
             </button>
             {el.folded ? (
-              <span className="tree-plusn" aria-hidden="true" style={{ left: el.x + el.w + 6, top: el.y + 8 }}>+{n}</span>
+              <span className="tree-plusn" aria-hidden="true" style={{ left: el.x + el.w + 6, top: el.y + el.h - 17 }}>+{n}</span>
             ) : null}
           </Fragment>
         )
@@ -1362,44 +1389,30 @@ export default function FreeLayer({ page, W, H, interactive }: Props) {
           </div>
         )
       })() : null}
-      {active && tool === 'select' && editing == null && hoverId != null && !selEls.includes(hoverId) ? (() => {
-        const he = page.els.find((e) => e.id === hoverId)
+      {/* **＋점**(끌어 잇기 · 누르면 가지). 올린 도형에는 변 가운데에, **고른 도형에는 변 밖 16px 에 늘**(2026-10-07 · 불편점 1번) —
+          고른 도형은 변 가운데가 크기 손잡이 자리라 밖으로 내고, 호버에 기대지 않는다(점까지 16px 틈을 지나면 호버가 풀린다).
+          전에는 고른 도형에서는 점이 안 떠서, Esc 로 편집을 끝낸 뒤 이을 길이 없었다. 떠 있던 서식 막대는 도구줄로 옮겼다(2차 3번) —
+          그래서 위쪽 점도 가려지지 않는다. */}
+      {active && tool === 'select' && editing == null ? (() => {
+        const dotEl = (hoverId != null && !selEls.includes(hoverId)) ? hoverId
+          : (selEls.length === 1 && selEl != null && !(tableSel && tableSel.elId === selEl) ? selEl : null)
+        if (dotEl == null) return null
+        const he = page.els.find((e) => e.id === dotEl)
         if (!he || he.locked || NO_CPT.includes(he.type)) return null
+        const out = dotEl === selEl && selEls.length === 1 ? 16 : 0
         const pts: { d: 't' | 'r' | 'b' | 'l'; x: number; y: number }[] = [
-          { d: 't', x: he.x + he.w / 2, y: he.y },
-          { d: 'r', x: he.x + he.w, y: he.y + he.h / 2 },
-          { d: 'b', x: he.x + he.w / 2, y: he.y + he.h },
-          { d: 'l', x: he.x, y: he.y + he.h / 2 },
+          { d: 't', x: he.x + he.w / 2, y: he.y - out },
+          { d: 'r', x: he.x + he.w + out, y: he.y + he.h / 2 },
+          { d: 'b', x: he.x + he.w / 2, y: he.y + he.h + out },
+          { d: 'l', x: he.x - out, y: he.y + he.h / 2 },
         ]
         return (<>{pts.map((pt) => (
-          <div key={'cpt' + pt.d} className="cpt" title="끌어서 다른 도형에 연결"
+          <div key={'cpt' + pt.d} className="cpt" title={out ? '누르면 가지 · 끌면 그 자리에 새 상자 · 다른 도형에 놓으면 연결' : '끌어서 다른 도형에 연결'}
             style={{ position: 'absolute', left: pt.x - 6, top: pt.y - 6, width: 12, height: 12, borderRadius: '50%', background: '#2462EB', border: '2px solid #fff', boxShadow: '0 1px 3px rgba(0,0,0,.3)', cursor: 'crosshair', pointerEvents: 'auto', zIndex: 7 }}
             onPointerEnter={() => setHoverId(he.id)}
             onPointerLeave={() => setHoverId((h) => (h === he.id ? null : h))}
             onPointerDown={(e) => onNodeDown(e, he, pt.d)} />
         ))}</>)
-      })() : null}
-      {active && selEls.length === 1 && selEl != null && editing == null && tool === 'select' && !(tableSel && tableSel.elId === selEl) ? (() => {
-        const se = page.els.find((e) => e.id === selEl)
-        if (!se || se.locked) return null
-        const top0 = se.y - 42
-        const top = top0 < 4 ? se.y + se.h + 8 : top0
-        const left = Math.max(2, Math.min(W - 220, se.x))
-        const showFill = !NO_FILL.includes(se.type)
-        return (
-          <div className="ctxbar" style={{ position: 'absolute', left, top, zIndex: 8, pointerEvents: 'auto' }} onPointerDown={(e) => e.stopPropagation()}>
-            {showFill ? <ColorPicker value={se.color} onChange={(c) => setFill(se, c)} allowTransparent /> : null}
-            {showFill ? FCOLORS.slice(0, 6).map((c) => (
-              <button key={c} className="ctx-dot" style={{ background: c }} title="채우기색" onClick={() => setFill(se, c)} />
-            )) : null}
-            {showFill ? <span className="ctx-sep" /> : null}
-            <button className="ctx-b" title="연결(화살표)" onClick={() => startConnectFrom(se.id)}>→</button>
-            <button className="ctx-b" title="복제" onClick={() => emit('ebook:dup')}>⧉</button>
-            <button className="ctx-b" title="맨 앞으로" onClick={() => emit('ebook:z-front')}>▲</button>
-            <button className="ctx-b" title="맨 뒤로" onClick={() => emit('ebook:z-back')}>▼</button>
-            <button className="ctx-b danger" title="삭제" onClick={() => emit('ebook:del')}>🗑</button>
-          </div>
-        )
       })() : null}
     </div>
   )

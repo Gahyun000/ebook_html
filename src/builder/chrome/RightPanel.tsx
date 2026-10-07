@@ -12,7 +12,12 @@ import Editor from '../Editor'
 import ColorPicker from './ColorPicker'
 import { pageSize } from '../../cards/sizing'
 import { PAPER_OPTIONS } from '../../cards/paper'
-import { FCOLORS } from '../../canvas/model'
+import { FCOLORS, NO_CPT } from '../../canvas/model'
+import { addNext } from '../mindActions'
+import { SHAPES } from './EditToolbar'
+import { polyClip, SHAPE_RADIUS } from '../../canvas/shapePaths'
+import Modal from '../../ui/Modal'
+import { mermaidOfPage } from '../../cards/mermaidOut'
 import { pushSnap } from '../../canvas/model'
 import type { FreeEl } from '../../state/store'
 import { addRow, delRow, addCol, delCol, setAlignRange, setVAlignRange, setCellFsRange, setCellBgRange } from '../../canvas/tableOps'
@@ -99,7 +104,7 @@ export default function RightPanel() {
   const duplicatePage = useBuilder((s) => s.duplicatePage)
   const expandMindmap = useBuilder((s) => s.expandMindmap)
   const setCanvas = useBuilder((s) => s.setCanvas)
-  const treeAdd = useBuilder((s) => s.treeAdd)
+  const [mmOpen, setMmOpen] = useState(false)
   const treeFold = useBuilder((s) => s.treeFold)
   const K = useKey()
   const removePage = useBuilder((s) => s.removePage)
@@ -177,10 +182,11 @@ export default function RightPanel() {
 
   /** 트리(EVER-SKETCH1 c7effe6). **뿌리는 선에서 센다** — 저장된 값이 아니라.
    *  그래서 사람이 선을 하나 그어 뿌리를 자식으로 만들어도 단추가 바로 따라온다. */
-  const tree = page && isTreePage(page)
+  /** 선으로 이어진 그림의 모양(2026-10-07 2차 4번 「머메이드와 도형은 별개가 아님」) — 머메이드로 펼쳤든 키 · ＋점으로 이었든 같이 본다. 마인드맵(방사형)은 제외. */
+  const tree = page && page.mindmapCenter == null && (isTreePage(page) || page.conns.length > 0)
     ? treeShape(page.els, page.conns, knownOf(page)) : null
-  const elInTree = !!(tree && selElId != null && tree.members.includes(selElId))
-  const elIsRoot = !!(tree && selElId != null && tree.roots.includes(selElId))
+  /** 이어 붙이기 단추가 뜨는 상자 — 선을 달 수 있는 갈래면 선이 아직 없어도 뜬다(첫 가지를 여기서 붙일 수 있게). */
+  const elCanBranch = !!(el && page && page.mindmapCenter == null && el.echoOf == null && !NO_CPT.includes(el.type) && el.type !== 'image')
   const elKids = tree && selElId != null ? (tree.kids.get(selElId) || []).length : 0
   const elFolded = !!(el && el.folded)
   const hiddenN = tree && selElId != null ? descendantCount(tree, selElId) : 0
@@ -341,23 +347,23 @@ export default function RightPanel() {
                 고른 것이 있어야 뜬다 — 마인드맵의 「＋ 가지」가 쪽 칸에 있는 것과 다른 이유다.
                 **뿌리를 골랐을 때는 「＋ 형제」가 「＋ 새 뿌리」로 바뀐다.** 뿌리는 부모가 없어서
                 「형제」라는 말이 틀리는데, 하는 일은 같다 — 부모 없는 줄기를 하나 더 만든다. */}
-            {elInTree && el.echoOf == null ? (<>
-              <div className="insp-sec">트리</div>
+            {/* **이어 붙이기**(2026-10-07 2차 → 3차 「엔터는 형제, 스페이스는 자식」). 자식은 고른 상자 오른쪽(Space), 형제는 같은 부모 아래(Enter).
+                **다른 상자는 안 움직인다**(같은 부모의 자식 열만 일곱까지 부모 가운데에). 머메이드로 펼친 상자든 손으로 놓은 상자든 같다. */}
+            {elCanBranch ? (<>
+              <div className="insp-sec">이어 붙이기</div>
               <div className="insp-row">
-                <button className="insp-pill" title="고른 상자 오른쪽 한 칸에 붙입니다 (Space)"
-                  onClick={() => { if (!page) return; snapPage(); treeAdd(page.id, selElId, 'child') }}>＋ 자식</button>
-                <button className="insp-pill"
-                  title={elIsRoot ? '뿌리는 부모가 없어서, 부모 없는 줄기를 하나 더 만듭니다'
-                                  : `고른 상자 바로 아래, 같은 부모 밑에 붙입니다 (${K('enter')})`}
-                  onClick={() => { if (!page) return; snapPage(); treeAdd(page.id, selElId, elIsRoot ? 'root' : 'sibling') }}>
-                  {elIsRoot ? '＋ 새 뿌리' : '＋ 형제'}</button>
+                <button className="insp-pill" title="고른 상자 오른쪽에 자식을 붙입니다 (Space)"
+                  onClick={() => { if (!page || selElId == null) return; addNext(page.id, selElId, 'right') }}>＋ 자식</button>
+                <button className="insp-pill" title={`고른 상자 바로 아래에 형제를 붙입니다 — 같은 부모 (${K('enter')}) · 뿌리면 선 없는 또 하나의 뿌리`}
+                  onClick={() => { if (!page || selElId == null) return; addNext(page.id, selElId, 'sibling') }}>＋ 형제</button>
                 {elKids > 0 ? (
                   <button className="insp-pill" title={elFolded ? '아래를 다시 폅니다' : `아래 ${hiddenN}개를 숨깁니다`}
                     onClick={() => { if (!page || selElId == null) return; snapPage(); treeFold(page.id, selElId) }}>
                     {elFolded ? '▸ 펴기' : '▾ 접기'}</button>
                 ) : null}
+                {tree ? <button className="insp-pill" title="이 그림을 머메이드 글로 봅니다" onClick={() => setMmOpen(true)}>머메이드 보기</button> : null}
               </div>
-              <span style={cap}>붙이면 트리가 <b>다시 앉습니다</b> — 자리가 곧 구조라서요. {K('mod+Z')} 로 한 번에 돌아갑니다.
+              <span style={cap}>같은 부모의 자식들은 <b>일곱까지 부모 가운데에</b> 맞춰 서고, 그 밖의 상자는 안 움직입니다. {K('mod+Z')} 로 되돌립니다.
                 {elKids > 0 ? <> 접은 것은 <b>편집 화면에서만</b> 숨고, 미리보기·발표·내보내기에는 다 펴져 나갑니다.</> : null}</span>
             </>) : null}
             {el.echoOf != null ? (<>
@@ -524,6 +530,18 @@ export default function RightPanel() {
                 </div>
                 <div className="insp-hint">상자를 사진 원래 비율로 맞춰 위아래 여백을 없앱니다.</div>
               </>) : null}
+              {/* **모양 바꾸기**(2026-10-07 2차 2번) — 도구줄 팝업과 같은 갈래 · 같은 꼭짓점. 크기 · 색 · 글자는 그대로 두고 갈래만 바꾼다. */}
+              {SHAPES.some((sh) => sh.t === el.type) ? (<>
+                <div className="insp-sec">모양</div>
+                <div className="shp-grid insp-shapes">
+                  {SHAPES.map((sh) => (
+                    <button key={sh.t} className={'shp-cell' + (el.type === sh.t ? ' on' : '')} title={sh.label}
+                      onClick={() => patch({ type: sh.t })}>
+                      <span className={'shp-sh ' + sh.t} style={{ clipPath: polyClip(sh.t), borderRadius: SHAPE_RADIUS[sh.t] }} />
+                    </button>
+                  ))}
+                </div>
+              </>) : null}
               <div className="insp-sec">프리셋 스타일</div>
               <div className="insp-sw">{PRESETS.map((ps) => (<span key={ps.name} className="insp-preset" title={ps.name} style={{ background: ps.color, color: ps.tcolor }} onClick={() => patch({ color: ps.color, tcolor: ps.tcolor })}>가</span>))}</div>
               <div className="insp-sec">채우기</div>
@@ -655,13 +673,15 @@ export default function RightPanel() {
               마인드맵의 「＋ 가지」와 같은 자리라 손이 기억한다.
               글로 줄기를 둘 쓰는 길도 그대로 열려 있고, 그렇게 들어온 뿌리도 여기 수에 잡힌다. */}
           {tree ? (<>
-            <div className="insp-sec">트리</div>
+            <div className="insp-sec">도식</div>
             <div className="insp-row">
-              <button className="insp-pill" title="빈 자리에 부모 없는 줄기를 하나 만듭니다"
-                onClick={() => { if (!page) return; snapPage(); treeAdd(page.id, null, 'root') }}>＋ 새 뿌리</button>
+              <button className="insp-pill" title="빈 자리에 선 없는 상자를 하나 만듭니다"
+                onClick={() => { if (!page) return; snapPage(); useBuilder.getState().treeAdd(page.id, null, 'root') }}>＋ 새 상자</button>
+              {/* **머메이드 보기**(2026-10-07 2차 4번) — 「어떤 도식화를 하면 그것의 머메이드 소스를 볼 수 있도록」. 지금 그림에서 뽑는다. */}
+              <button className="insp-pill" title="이 그림을 머메이드 글로 봅니다 (복사해 둘 수 있어요)" onClick={() => setMmOpen(true)}>머메이드 보기</button>
               <span className="insp-hint" style={{ margin: 0 }}>지금 뿌리 {tree.roots.length}개</span>
             </div>
-            <span style={cap}>상자를 고르면 <b>＋ 자식 · ＋ 형제 · 접기</b>가 나옵니다.</span>
+            <span style={cap}>상자를 고르면 <b>＋ 자식 · ＋ 형제 · 접기</b>가 나옵니다. 붙여도 있던 상자는 안 움직여요(같은 부모의 자식들만 가운데 맞춤).</span>
           </>) : null}
 
           {/* **＋ 가지**(EVER-SKETCH1 8c7c812). 펼쳐진 마인드맵에만 나온다 —
@@ -700,6 +720,18 @@ export default function RightPanel() {
           <div className="ax-editwrap"><Editor /></div>
         </div>
       )}
+      {/* 머메이드 소스 창 — 보기만 한다(행동은 「복사」 뿐). 글은 지금 그림에서 뽑는다(cards/mermaidOut). */}
+      {mmOpen && page ? (() => {
+        const src = mermaidOfPage(page)
+        return (
+          <Modal title="머메이드 소스" onClose={() => setMmOpen(false)} cancel="closeX" size="sm" className="mm-view"
+            footer={<button className="insp-pill" onClick={() => { void navigator.clipboard?.writeText(src) }}>복사</button>}>
+            <textarea className="mm-src" readOnly value={src} rows={Math.min(18, Math.max(6, src.split('\n').length + 1))}
+              style={{ width: '100%', fontFamily: 'ui-monospace, Consolas, monospace', fontSize: 12, lineHeight: 1.5, resize: 'vertical' }} />
+            <span style={cap}>지금 그림(상자와 선)에서 뽑은 글이에요. 고르기 창의 「머메이드 LR」에 붙여 넣으면 새 쪽으로 다시 펼칩니다.</span>
+          </Modal>
+        )
+      })() : null}
     </div>
   )
 }

@@ -162,7 +162,14 @@ export default function Preview() {
   })
 
   return (<>
-    <div className="stage" ref={stageRef} style={{ overflowX: lay.needX ? 'scroll' : 'hidden', overflowY: lay.needY ? 'scroll' : 'hidden', background: bg }}>
+    <div className="stage" ref={stageRef} style={{ overflowX: lay.needX ? 'scroll' : 'hidden', overflowY: lay.needY ? 'scroll' : 'hidden', background: bg }}
+      // **종이 밖 빈 곳에서 끌면 고르기**(2026-10-07 · 불편점 4번). 종이(.pv-paper) 안은 FreeLayer 가 직접 받는다.
+      onPointerDown={(e) => {
+        if (e.button !== 0 || useCanvasUI.getState().tool !== 'select') return
+        if ((e.target as HTMLElement).closest('.pv-paper')) return
+        e.preventDefault()
+        window.dispatchEvent(new CustomEvent('ebook:marquee', { detail: { x: e.clientX, y: e.clientY } }))
+      }}>
       {page
         ? (
           // 가운데 두기는 workArea.layout 이 맡는다 — 종이가 작업창보다 커지면 왼쪽 위 여백부터 구른다.

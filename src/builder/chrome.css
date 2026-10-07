@@ -75,6 +75,8 @@
 .shp-pop.cats{min-width:210px;max-height:60vh;overflow:auto;gap:2px}
 .shp-cat-h{font-size:10.5px;font-weight:700;color:#9aa3b2;letter-spacing:.4px;padding:6px 6px 3px}
 .shp-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:2px}
+/* 오른쪽 패널 「모양」(2026-10-07) — 팝업과 같은 칸을 패널 폭에 맞춰 일곱 줄로. */
+.insp-shapes{grid-template-columns:repeat(7,1fr);margin:2px 0 6px}
 .shp-cell{display:flex;align-items:center;justify-content:center;height:30px;border:none;background:transparent;border-radius:7px;color:var(--ax-ink,#1a1a1a);cursor:pointer}
 .shp-cell:hover{background:#f0f5ff}
 .shp-cell.on{background:var(--ax-blue-100,#eaf2fd)}
@@ -163,7 +165,9 @@
 .ax-stage-wrap{background:#e9eaed;overflow:hidden;min-height:0;display:flex;flex-direction:column;position:relative}
 .ax-rightcell{min-width:0;overflow:hidden}
 .ax-rightcell>.ax-panelcol{width:100%;height:100%}
-.ax-resize{position:absolute;top:0;bottom:0;width:7px;cursor:col-resize;z-index:5}
+/* 폭 조절 띠는 **종이 아래**에 깐다(2026-10-07 · 2차 3번). z-index 5 였을 때 작업면 왼쪽 7px 를 덮어, 종이가 왼쪽 끝에 붙으면
+   그 자리의 접기 손잡이 · 상자를 눌러도 반응이 없었다(스모크 6단계 「기획」 접기). 회색 여백에서는 여전히 잡힌다 — 종이(.pv-paper z 2)만 위. */
+.ax-resize{position:absolute;top:0;bottom:0;width:7px;cursor:col-resize;z-index:1}
 .ax-resize.l{left:0}.ax-resize.r{right:0}
 .ax-resize:hover{background:rgba(36,98,235,.28)}
 .ax-edge{position:absolute;top:50%;transform:translateY(-50%);z-index:6;width:18px;height:46px;border:1px solid var(--ax-line);background:#fff;border-radius:9px;cursor:pointer;font-size:13px;color:var(--ax-muted);display:grid;place-items:center;box-shadow:0 2px 8px rgba(0,0,0,.10);padding:0}
@@ -182,7 +186,7 @@
    막대(축마다 scroll/hidden)는 Preview 가 workArea 규칙으로 직접 준다. overflow:auto 에 맡기면 가로 막대가 세로 막대를 부른다. */
 .ax-stage-wrap .stage{flex:1 1 auto;min-height:0;display:block;padding:0;background:#fff;border-radius:0}
 .ax-stage-wrap .stage .pv-ext{position:relative}
-.ax-stage-wrap .stage .pv-paper{position:absolute}
+.ax-stage-wrap .stage .pv-paper{position:absolute;z-index:2}
 .ax-stage-wrap .stage .pv-empty{height:100%;display:flex;align-items:center;justify-content:center}
 .pv-out{color:#b4541a}
 .ax-panelcol{display:grid;grid-template-columns:1fr 52px;background:var(--ax-surface);border-left:1px solid var(--ax-line);min-height:0}

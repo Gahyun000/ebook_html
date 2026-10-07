@@ -8,7 +8,7 @@ import { copyParts, pasteParts } from '../canvas/clipboard'
 import type { Clip } from '../canvas/clipboard'
 import { isTreePage, treeShape, knownOf } from '../cards/treeOps'
 import { mindKey, navTarget } from './mindKeys'
-import { addTopic } from './mindActions'
+import { addNext } from './mindActions'
 
 interface Props {
   presentOpen: boolean; helpOpen: boolean; tutorialOpen: boolean
@@ -157,9 +157,10 @@ export default function Hotkeys(props: Props) {
 
       /**
        * **알마인드식 가지 키**(2026-10-06 · mindKeys.ts). 상자 **하나**를 고른 채 —
-       *   Space · Insert 자식 / Enter 형제 / Shift+Enter 앞 형제 → 붙이고 곧바로 글을 친다.
+       *   Space · Insert = 자식(오른쪽) / Enter = **형제**(같은 부모 · 바로 아래) / Shift+Enter = 앞 형제 → 붙이고 곧바로 글을 친다(mindActions.addNext ·
+       *   2026-10-07 3차 — 사용자가 「엔터는 형제, 스페이스는 자식」 으로 되돌림). 같은 부모의 자식 열은 일곱까지 부모 가운데에 맞춰 선다.
        *   방향키 = 부모 · 자식 · 형제로 옮겨 가기 / Delete = 가지째 / 접기 · 펴기.
-       * 붙일 때마다 스토어가 트리를 **종이 안에** 다시 앉힌다(`treeAdd` → `layoutTree`).
+       * **다른 상자는 안 움직인다**(canvas/placeNext · 2차 6번) — 전에는 붙일 때마다 트리를 다시 앉혔다.
        *
        * 손으로 놓은 일반 쪽에서도 **붙이는 키**는 듣는다 — 그 순간 그 쪽이 트리 쪽이 된다.
        * 옮겨 가기 · 가지째 지우기 · 접기는 **트리 쪽에서만** 듣는다. 손으로 이어 둔 그림에서 Delete 한 번에
@@ -182,10 +183,11 @@ export default function Hotkeys(props: Props) {
         if (act === 'child' || act === 'sibling' || act === 'before') {
           e.preventDefault()
           if (e.repeat) return
-          addTopic(mind.page.id, mind.id, act)       // 기억 · 붙이기 · 고르기 · 편집 열기 · 보이게 굴리기
+          addNext(mind.page.id, mind.id, act === 'child' ? 'right' : act)   // 기억 · 붙이기 · 고르기 · 편집 열기 · 보이게 굴리기
           return
         }
-        if (mind.tree && (act === 'fold' || act === 'unfold' || act === 'unfoldAll')) {
+        // 접기 키는 선으로 이어진 상자면 어디서든(2026-10-07 2차 1·4번) — 옮겨 가기 · 가지째 지우기는 트리 쪽(mind.tree)에서만.
+        if ((mind.tree || mind.shape.members.includes(mind.id)) && (act === 'fold' || act === 'unfold' || act === 'unfoldAll')) {
           e.preventDefault()
           const folded = (id: number) => mind.page.els.some((x) => x.id === id && x.folded)
           const kids = (mind.shape.kids.get(mind.id) || []).length

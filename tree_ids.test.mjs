@@ -65,7 +65,7 @@ S().setOrientation('landscape')
   S().addCard('tree', undefined, VIDEO)
   let p = last()
   const bepo = p.els.find((e) => e.text === '배포' && e.echoOf == null)
-  S().treeAdd(p.id, bepo.id, 'child')
+  S().treeAdd(p.id, bepo.id, 'right')
   p = last()
   const kid = p.els.find((e) => e.text === '새 상자')
   check(!!kid && fedBy(p, kid, bepo), '**새 상자로 가는 선이 있다** — 「배포」 의 자식이다(선을 버리지 않는다)',
@@ -74,7 +74,7 @@ S().setOrientation('landscape')
   check(unique(p), '한 쪽 안의 번호가 모두 다르다')
 
   // 한 번 더 — 처음엔 두 번째도 똑같이 외톨이가 됐다.
-  S().treeAdd(p.id, bepo.id, 'child')
+  S().treeAdd(p.id, bepo.id, 'right')
   p = last()
   const kids = p.els.filter((e) => e.text === '새 상자')
   check(kids.length === 2 && kids.every((k) => fedBy(p, k, bepo)), '두 번째 「＋ 자식」 도 선으로 이어진다', String(kids.length))
@@ -88,10 +88,10 @@ S().setOrientation('landscape')
   let p = last()
   const seol = p.els.find((e) => e.text === '설계' && e.echoOf == null)
   const giho = p.els.find((e) => e.text === '기획' && e.echoOf == null)
-  S().treeAdd(p.id, seol.id, 'sibling')
+  S().treeAdd(p.id, seol.id, 'down')
   p = last()
   const sib = p.els.find((e) => e.text === '새 상자')
-  check(!!sib && fedBy(p, sib, giho), '「＋ 형제」 — 같은 부모(기획)에서 선이 온다')
+  check(!!sib && fedBy(p, sib, seol), '「↓ 아래에」 — 고른 상자(설계)에서 선이 온다(2026-10-07 2차: 형제가 아니라 아래 자식)')
   S().treeAdd(p.id, giho.id, 'root')
   p = last()
   const root = p.els.find((e) => e.text === '새 뿌리')
@@ -100,7 +100,7 @@ S().setOrientation('landscape')
   S().treeFold(p.id, giho.id); S().treeFold(last().id, giho.id)
   p = last()
   const bepo = p.els.find((e) => e.text === '배포' && e.echoOf == null)
-  S().treeAdd(p.id, bepo.id, 'child')
+  S().treeAdd(p.id, bepo.id, 'right')
   p = last()
   const kid = p.els.filter((e) => e.text === '새 상자').find((e) => fedBy(p, e, bepo))
   check(!!kid && unique(p), '접었다 편 뒤의 「＋ 자식」 도 선으로 이어진다')
@@ -125,10 +125,10 @@ S().setOrientation('landscape')
 // ── 4. 고친 자리가 코드에 남아 있나 ────────────────────────────
 {
   const st = bare(read('./src/state/store.ts'))
-  // 2026-10-06: 붙이기 · 접기 · 가지째 지우기는 `seatTree`(안 겹칠 때까지 키워 앉힘)를 거친다. 카드로 펼칠 때만 layoutTree 를 바로 부른다.
+  // 2026-10-07 2차(재정렬 없음): 앉히는 곳은 카드로 처음 펼칠 때(addCard) 한 곳뿐이다 — 붙이기 · 접기 · 가지째 지우기는 자리를 안 옮긴다.
   const calls = (st.match(/const laid = (layoutTree|seatTree)\(/g) || []).length
   const claims = (st.match(/claimIds\(laid\.els\)/g) || []).length
-  check(calls === 4 && claims === 4, '스토어가 트리를 앉히는 **네 곳 모두** 뒤에 번호표를 올린다(2026-10-06 가지째 지우기 추가)', `앉히기 ${calls} · claimIds ${claims}`)
+  check(calls === 1 && claims === 1, '스토어가 트리를 앉히는 **한 곳**(처음 펼칠 때) 뒤에 번호표를 올린다', `앉히기 ${calls} · claimIds ${claims}`)
 }
 
 console.log(`\n${pass} passed, ${fail} failed`)

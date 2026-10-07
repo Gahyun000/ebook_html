@@ -107,7 +107,10 @@ const box = (x, y, bw = w, bh = h) => ({ x, y, w: bw, h: bh })
   check(!/addEl\(/.test(cell), '도구줄이 **직접 만들지 않는다** — 되돌리기·가둠을 건너뛰는 샛길이 생긴다')
 }
 
-// ── ③ 캔버스가 받아서 **한 규칙으로** 놓는다 ───────────────
+// ── ③ 캔버스가 받아서 **무장한다** — 놓는 것은 찍은 자리(onLayerDown) 한 곳 ───────────────
+// 2026-10-07 고침(사용자 결정 · EverSketch 불편점 6번): 「고르면 곧바로 한가운데」(e4dfbfd · 90e7439)를 뒤집어
+// 「고르면 무장 → 빈 곳을 찍으면 그 자리에」 로. 전에는 여기서 centerSpot · snap · setSel · setTool('select') 를 봤다.
+// 되돌리기 · 고르기 · 손 놓기는 이제 onLayerDown 의 놓는 줄이 맡는다(④ · shape_place.test.mjs).
 {
   const raw = read('./src/canvas/FreeLayer.tsx')
   const fl = strip(raw)
@@ -115,12 +118,10 @@ const box = (x, y, bw = w, bh = h) => ({ x, y, w: bw, h: bh })
   check(i > 0, '캔버스가 그 말을 듣는다')
   const j = fl.indexOf('const onPlace')
   const body = j < 0 ? '' : fl.slice(j, j + 900)
-  check(/centerSpot\(page\.els/.test(body), '자리는 **centerSpot 한 곳**이 정한다')
+  check(/setTool\(cur === type \? 'select' : type as Tool\)/.test(body), '고르면 **무장**한다(같은 것을 또 고르면 내려놓음)')
   check(/ADDABLE\.indexOf\(type\) < 0\) return/.test(body),
     '**모르는 이름은 되돌려 보낸다** — mkFreeEl 은 모르는 갈래를 조용히 네모로 바꾼다')
-  check(/\bsnap\(\)/.test(body), '되돌리기에 남는다 — 실수로 놓았을 때 ⌘Z 가 들어야 한다')
-  check(/setSel\(el\.id\)/.test(body), '놓자마자 골라 준다 — 바로 색·크기를 만질 수 있다')
-  check(/setTool\('select'\)/.test(body), '놓고 나면 손을 놓는다')
+  check(!/addEl\(/.test(body) && !/centerSpot/.test(body), '곧바로 놓지 않는다 — 찍은 자리에 놓는 것은 onLayerDown 한 곳')
   // 하나 놓을 때 하나만 생겨야 한다. 안 그러면 쪽마다 하나씩 생긴다.
   check(/if \(!interactive\) return/.test(body.slice(0, 200)) || /if \(!interactive\) return[\s\S]{0,200}const onPlace/.test(fl),
     '편집 중인 쪽에서만 받는다 — 아니면 쪽 수만큼 생긴다')
@@ -150,11 +151,12 @@ const box = (x, y, bw = w, bh = h) => ({ x, y, w: bw, h: bh })
   check(/run: \(\) => tool\('pen'\)/.test(menu), '「선」은 그대로 도구다 — 그어야 생긴다')
 
   // **커서까지 넣어 준다.** 이게 빠지면 「텍스트」라고 적힌 빈 상자만 늘어난다.
-  check(/if \(type === 'text' \|\| type === 'wordart'\) startEditing\(el\.id\)/.test(fl),
+  // (2026-10-07) 놓는 자리가 onLayerDown 으로 옮겨 가면서 이 줄도 거기 있다 — 메모(note)도 같은 줄에서 연다.
+  check(/if \(tool === 'text' \|\| tool === 'wordart' \|\| tool === 'note'\) startEditing\(el\.id\)/.test(fl),
     '**글을 담는 것은 놓자마자 커서가 들어간다** — 빠지면 두 번 더 눌러야 써진다')
   // 좌표를 주면 그 자리에 커서만 놓인다. 안 주어야 기본 글자가 **통째로** 골라져
   // 그냥 치면 덮어써진다(키노트·파워포인트와 같은 손놀림).
-  check(/startEditing\(el\.id\)\n/.test(fl) || /startEditing\(el\.id\)$/m.test(fl),
+  check(/\) startEditing\(el\.id\); return \}/.test(fl),
     '좌표 없이 부른다 — 그래야 기본 글자가 통째로 골라진다')
   // 표는 넣지 않는다. 칸이 여럿이라 「어느 칸」을 정할 수 없다.
   check(!/type === 'table'\) startEditing/.test(fl), '표는 커서를 안 넣는다 — 어느 칸일지 정할 수 없다')

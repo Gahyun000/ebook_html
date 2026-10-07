@@ -3,8 +3,11 @@ import { cardByKey } from '../cards/registry'
 import { pageSize } from '../cards/sizing'
 import { mindmapParts } from '../cards/mindmapEls'
 import { parseMermaid } from '../cards/mermaid'
-import { treeParts, LR_COL, LR_ROW, TD_COL, TD_ROW, PAD_X, PAD_TOP } from '../cards/treeEls'
+import { treeParts } from '../cards/treeEls'
 import { treeShape, layoutTree, newNode, TREE_CONN } from '../cards/treeOps'
+import { nextSpot, freeSpot, centeredYs, CENTER_MAX, GAP_SIDE, GAP_STACK } from '../canvas/placeNext'
+import type { Side } from '../canvas/placeNext'
+import type { Shape } from '../cards/treeOps'
 import type { ImportedDoc } from '../import/htmlImport'
 import { polish } from '../builder/polish'
 import { dropHistory, popDocRedo, popDocSnap, pushDocRedo, pushDocSnap, pushDocUndoRaw } from '../canvas/history'
@@ -28,7 +31,10 @@ export interface FreeEl { id: number; type: string; x: number; y: number; w: num
   /** 아래 띠 머리에 **흐리게 다시 놓은 부모**. 값은 원본 상자 id.
    *  다시 앉힐 때마다 지우고 새로 만든다 — 남겨 두면 원본 글자를 고쳤을 때 안 따라간다. */
   echoOf?: number }
-export interface Conn { from: number; to: number; bend?: { x: number; y: number }; kind?: 'straight' | 'ortho' | 'curve'; arrow?: 'end' | 'both' | 'none'; color?: string; width?: number; dash?: boolean }
+export interface Conn { from: number; to: number; bend?: { x: number; y: number }; kind?: 'straight' | 'ortho' | 'curve'; arrow?: 'end' | 'both' | 'none'; color?: string; width?: number; dash?: boolean
+  /** 꺾은선이 **어느 변에서 나가는가**(2026-10-07 · 불편점 5번). 옆으로 붙인 선은 'h'(오른쪽 변), 아래 · 위로 붙인 선은 'v'(아래 변).
+   *  없으면 트리 방향 · 자동(connPath). 적어 두는 까닭: 재정렬이 없어 자식이 여럿 쌓여도 선이 늘 같은 변에서 나가야 해서다. */
+  axis?: 'h' | 'v' }
 export interface Stroke { points: [number, number][]; color: string; w: number; hl?: boolean }
 export type BlockType = 'h1' | 'h2' | 'h3' | 'h4' | 'text' | 'bullet' | 'numbered' | 'todo' | 'divider' | 'toggle' | 'callout'
 export type CalloutTone = 'info' | 'key' | 'warn'
@@ -86,14 +92,15 @@ export interface BuilderState {
   addStroke: (pageId: number, stroke: Stroke) => void
   reorderEl: (pageId: number, elId: number, toFront: boolean) => void
   setCanvas: (pageId: number, data: CanvasData) => void
-  /** 트리에 상자 하나를 붙인다.
-   *  `kind`: 자식 · 형제 · 새 뿌리. **뿌리를 골라 「형제」를 부르면 새 뿌리가 된다** —
-   *  단추 글자도 그때 「＋ 새 뿌리」로 바뀐다(RightPanel). 붙인 뒤 트리를 다시 앉힌다. */
-  treeAdd: (pageId: number, elId: number | null, kind: 'child' | 'sibling' | 'before' | 'root') => void
-  /** 상자를 **그 아래 가지째** 지우고 트리를 다시 앉힌다(알마인드 Delete).
+  /** 고른 상자(`elId`)에 상자 하나를 붙이고 선을 잇는다. `kind`: 자식(`right` · `down` · `up` · `left` = ＋점의 변 · Space 는 right) ·
+   *  `sibling`(형제 — 같은 부모 · 고른 상자 바로 아래 · Enter) · `before`(앞 형제 · Shift+Enter) · `root`(고른 것 없이 빈 자리).
+   *  **다른 상자는 안 움직인다**(2차 6번) — 다만 같은 부모의 자식 열은 일곱까지 부모 가운데에 맞춰 선다(3차). 뿌리의 형제는 선 없는 또 하나의 뿌리.
+   *  새 상자는 고른 상자의 모양 · 크기 · 색을 닮는다. */
+  treeAdd: (pageId: number, elId: number | null, kind: 'right' | 'down' | 'up' | 'left' | 'sibling' | 'before' | 'root') => void
+  /** 상자를 **그 아래 가지째** 지운다(알마인드 Delete). 남은 상자는 제자리.
    *  `removeEl` 은 상자 하나와 거기 걸린 선만 지워서, 자손이 선 없는 외톨이 뿌리로 남는다. */
   treeRemove: (pageId: number, elId: number) => void
-  /** 가지를 접거나 편다. 접힘은 `folded`, 안 보임은 매번 다시 계산한다. */
+  /** 가지를 접거나 편다. 접힘은 `folded`, 안 보임은 매번 다시 계산한다. 자리는 안 옮긴다. */
   treeFold: (pageId: number, elId: number) => void
   updateConn: (pageId: number, index: number, bend: { x: number; y: number }) => void
   patchConn: (pageId: number, index: number, patch: Partial<Conn>) => void
@@ -135,47 +142,27 @@ export function nextElId(): number { return elUid++ }
  * 그래서 트리를 앉힌 뒤에는 늘 이걸 부른다.
  */
 /**
- * 키 · 단추로 가지를 붙이고 지우고 접을 때 트리를 앉힌다(2026-10-07 다시 씀).
- *
- * `layoutTree` 는 **종이 안에** 앉히려고 간격을 줄이고, 모자라면 아래 띠로 접어 흐린 부모(echo)를 놓는다 — 카드로 처음
- * 펼칠 때는 그게 맞다. 하지만 손으로 붙여 나가는 가지는 사람이 **계속 뻗으려고** 붙이는 것이고, 슬라이드는 넘치면
- * 늘어난다(workArea.growOf · 이북에는 줄여 담김). 그래서 여기서는 —
- *   · **접지 않는다**: 아주 큰 가상 종이에 앉혀 띠 하나 · 줄이지 않은 간격을 얻는다(echo 가 안 생긴다).
- *   · **상자 크기를 그대로 둔다**: 간격을 가장 큰 상자에 맞춘다(전에는 132×38 로 바꿨다 — 「도형이 바뀐다」).
- *   · **제자리에서 시작한다**: 첫 뿌리가 원래 있던 자리에 오도록 트리를 통째로 옮긴다. 위 · 왼쪽으로 나가면
- *     여백 안으로만 밀어 넣는다(전에는 늘 종이 왼쪽 위 격자에서 시작했다).
- * `layoutTree` 자체는 안 건드린다 — 관계 읽기 · 접힘 · 줄 매기기는 그대로 쓴다.
+ * 부모 옆 열에 선 자식들을 `order` 순서로 다시 세운다(2026-10-07 3차). 일곱(CENTER_MAX)까지는 **부모 가운데**에 맞추고(centeredYs),
+ * 그게 남과 겹치거나 여덟 이상이면 **맨 위를 고정**하고 아래로 쌓는다. 그것도 겹치면 그대로 둔다(새 상자는 이미 열 끝에 있다).
+ * 자식이 움직이면 그 자손도 같은 만큼 따라간다. 부모는 안 움직인다.
  */
-const SEAT_PAPER = 100000, SEAT_PAD = 8
-function seatTree(els: FreeEl[], conns: Conn[], want: 'LR' | 'TD', known: number[]) {
-  const flat = layoutTree(els, conns, SEAT_PAPER, SEAT_PAPER, want, known)
-  const shape = treeShape(flat.els, flat.conns, known)
-  const mine = new Set(shape.members.filter((id) => !shape.hidden.has(id)))
-  const live = flat.els.filter((e) => mine.has(e.id))
-  if (!live.length) return flat
-  const lr = flat.dir === 'LR'
-  const baseX = lr ? LR_COL : TD_COL, baseY = lr ? LR_ROW : TD_ROW
-  const maxW = Math.max(...live.map((e) => e.w)), maxH = Math.max(...live.map((e) => e.h))
-  const stepX = Math.max(baseX, maxW + (lr ? 60 : 24)), stepY = Math.max(baseY, maxH + (lr ? 18 : 50))
-  // 격자 자리(칸 · 줄 번호)를 새 간격으로 옮기고, 작은 상자는 제 칸의 가운데에 둔다.
-  const at = new Map<number, { x: number; y: number }>()
-  for (const e of live) {
-    at.set(e.id, {
-      x: ((e.x - PAD_X) / baseX) * stepX + (lr ? 0 : (maxW - e.w) / 2),
-      y: ((e.y - PAD_TOP) / baseY) * stepY + (lr ? (maxH - e.h) / 2 : 0),
-    })
+function arrangeColumn(els: FreeEl[], shape: Shape, hub: FreeEl, order: FreeEl[]): FreeEl[] {
+  if (order.length < 2) return els
+  const hs = order.map((k) => k.h)
+  const attempt = (ys: number[]): FreeEl[] | null => {
+    const dy = new Map<number, number>()
+    const walk = (eid: number, d: number) => { if (dy.has(eid)) return; dy.set(eid, d); for (const c of shape.kids.get(eid) || []) walk(c, d) }
+    order.forEach((k, i) => { if (ys[i] !== k.y) walk(k.id, ys[i] - k.y) })
+    if (!dy.size) return els
+    const moved = els.filter((e) => dy.has(e.id)).map((e) => ({ ...e, y: e.y + (dy.get(e.id) || 0) }))
+    const still = els.filter((e) => !dy.has(e.id) && e.id !== hub.id && !e.hidden)
+    const clash = moved.some((m) => still.some((o) => m.x < o.x + o.w && o.x < m.x + m.w && m.y < o.y + o.h && o.y < m.y + m.h))
+    return clash ? null : els.map((e) => (dy.has(e.id) ? { ...e, y: e.y + (dy.get(e.id) || 0) } : e))
   }
-  const root = shape.roots.find((id) => mine.has(id))
-  const was = root != null ? els.find((e) => e.id === root) : undefined
-  const now = root != null ? at.get(root) : undefined
-  let dx = was && now ? was.x - now.x : PAD_X, dy = was && now ? was.y - now.y : PAD_TOP
-  const minX = Math.min(...[...at.values()].map((v) => v.x + dx)), minY = Math.min(...[...at.values()].map((v) => v.y + dy))
-  if (minX < SEAT_PAD) dx += SEAT_PAD - minX
-  if (minY < SEAT_PAD) dy += SEAT_PAD - minY
-  return { ...flat, els: flat.els.map((e) => {
-    const v = at.get(e.id)
-    return v ? { ...e, x: Math.round(v.x + dx), y: Math.round(v.y + dy) } : e
-  }) }
+  if (order.length <= CENTER_MAX) { const r = attempt(centeredYs(hub.y + hub.h / 2, hs)); if (r) return r }
+  const top = Math.min(...order.map((k) => k.y))
+  const stacked: number[] = []; let y = top; for (const h of hs) { stacked.push(y); y += h + GAP_STACK }
+  return attempt(stacked) ?? els
 }
 function claimIds(els: FreeEl[]): void { for (const e of els) if (e && e.id >= elUid) elUid = e.id + 1 }
 // 새 페이지의 필드는 빈칸으로 시작한다.
@@ -241,6 +228,11 @@ export function reseedUids(pages: Page[]): void {
       if (seen.has(e.id)) e.id = elUid++
       seen.add(e.id)
     }
+  }
+  // 기존 데이터 치유(2026-10-07 2차 4번): 옛 트리 선(연한 #b9c2d4 · 1.5 — 머메이드 · 아래 띠 이음)을 지금의 한 벌(TREE_CONN)로 맞춘다.
+  // 사용자: 「머메이드라고 되어있는 부분 또한 화살표의 굵기 및 색상을 현재의 화살표등에 맞게」. 마인드맵(방사형)의 선은 다른 그림이라 둔다.
+  for (const p of pages || []) {
+    for (const c of p.conns || []) if (c && c.color === '#b9c2d4') { c.color = TREE_CONN.color; c.width = TREE_CONN.width }
   }
 }
 
@@ -413,45 +405,66 @@ export const useBuilder = create<BuilderState>((set, get) => ({
   reorderEl: (pageId, elId, toFront) => set((s) => ({ pages: mapPage(s.pages, pageId, (p) => { const i = p.els.findIndex((e) => e.id === elId); if (i < 0) return p; const els = [...p.els]; const e = els.splice(i, 1)[0]; if (toFront) els.push(e); else els.unshift(e); return { ...p, els } }) })),
   setCanvas: (pageId, data) => set((s) => ({ pages: mapPage(s.pages, pageId, (p) => ({ ...p, els: data.els, conns: data.conns, strokes: data.strokes, ...(data.detached !== undefined ? { detached: data.detached } : {}) })) })),
   treeAdd: (pageId, elId, kind) => set((s) => {
+    const { W, H } = pageSize(s.orientation)
     return { pages: mapPage(s.pages, pageId, (p) => {
       const known = p.treeRoots || (p.treeRoot != null ? [p.treeRoot] : [])
-      const shape = treeShape(p.els, p.conns, known)
-      const id = nextElId()
-      const roots = known.slice()
-      // **손으로 놓은 상자에서도 시작한다**(2026-10-06 알마인드 키). 선이 하나도 없는 상자는 명단에 적어야
-      // 트리에 남는다 — 안 적으면 「형제」 를 붙였을 때 고른 상자만 제자리에 남아 새 뿌리와 포개진다.
-      if (elId != null && !shape.members.includes(elId) && p.els.some((e) => e.id === elId)) roots.push(elId)
-      // **새 상자는 고른 상자를 닮는다**(2026-10-07) — 모양 · 크기 · 색 · 글자. 전에는 늘 네모 132×38 이었다.
       const like = elId != null ? p.els.find((e) => e.id === elId) : undefined
+      const id = nextElId()
+      // **새 상자는 고른 상자를 닮는다**(2026-10-07) — 모양 · 크기 · 색 · 글자. 고른 것이 없으면 트리 기본 상자.
       const fresh = newNode(id, kind === 'root' ? '새 뿌리' : '새 상자')
       const node: FreeEl = like ? { ...fresh, type: like.type, w: like.w, h: like.h, color: like.color, fs: like.fs, tcolor: like.tcolor,
         bold: like.bold, italic: like.italic, underline: like.underline, align: like.align, borderColor: like.borderColor,
         borderWidth: like.borderWidth, borderDash: like.borderDash, opacity: like.opacity, shadow: like.shadow } : fresh
-      const els = [...p.els, node]
-      const conns = p.conns.slice()
-      // 뿌리의 「형제」는 **또 하나의 뿌리**다. 부모가 없으니 이을 데가 없다.
-      const parent = kind === 'root' ? null
-        : kind === 'child' ? elId
-        : (elId != null ? (shape.parent.get(elId) ?? null) : null)
-      if (parent == null) {
-        roots.push(id)
-      } else if ((kind === 'sibling' || kind === 'before') && elId != null) {
-        // 고른 상자 **바로 뒤**에 끼운다 — 줄 순서는 선 순서를 따르므로 맨 뒤에 붙이면
-        // 새 상자가 형제들 맨 아래로 간다. 사람이 기대하는 자리는 고른 것 바로 밑이다.
-        // 「앞 형제」(before)는 같은 자리의 **앞**에 끼운다.
-        const at = conns.findIndex((c) => c && c.to === elId)
-        const nc = { from: parent, to: id, ...TREE_CONN }
-        if (at >= 0) conns.splice(kind === 'before' ? at : at + 1, 0, nc); else conns.push(nc)
-      } else {
-        conns.push({ from: parent, to: id, ...TREE_CONN })
+      const visible = p.els.filter((e) => !e.hidden)
+      const shape0 = treeShape(p.els, p.conns, known)
+      const sibling = kind === 'sibling' || kind === 'before'
+      const parentId = sibling && like ? shape0.parent.get(like.id) : undefined
+      const parent = parentId != null ? p.els.find((e) => e.id === parentId) : undefined
+      if (!like || kind === 'root' || (sibling && !parent)) {
+        // 고른 것 없이 「＋ 새 상자」 — 빈 자리에. **뿌리의 형제** 는 선 없는 또 하나의 뿌리(사용자 결정 2026-10-07) — 고른 상자 바로 아래(앞 형제면 위).
+        // 둘 다 명단에 적어야 트리 쪽으로 남는다(선이 없으니 달리 알 길이 없다).
+        const at = like && kind !== 'root' ? nextSpot(like, kind === 'before' ? 'up' : 'down', visible, { w: node.w, h: node.h })
+          : freeSpot(visible, { w: node.w, h: node.h }, W, H)
+        node.x = at.x; node.y = at.y
+        const roots = [...known, id]
+        return { ...p, els: [...p.els, node], treeRoots: roots, treeRoot: roots[0], treeDir: p.treeDir || 'LR' }
       }
-      const laid = seatTree(els, conns, p.treeDir || 'LR', roots)
-      claimIds(laid.els)
-      // 명단이 비어 있으면(손으로 이은 쪽에서 처음 붙였다) 지금의 뿌리를 적는다 — 그래야 이 쪽이
-      // 트리 쪽으로 읽혀(`isTreePage`) 접기 손잡이와 패널 단추가 따라 나온다.
-      const marked = roots.length ? roots : treeShape(laid.els, laid.conns).roots
-      return { ...p, els: laid.els, conns: laid.conns, treeDir: laid.dir,
-               treeRoots: marked, treeRoot: marked[0] ?? p.treeRoot }
+      // 누구에게 붙이나 — 자식(right · down · up · left = ＋점의 변)은 고른 상자에, **형제는 그 부모에**(알마인드 · 3차 「엔터는 형제」).
+      // 형제는 고른 상자가 부모의 어느 쪽에 있는지 따라 같은 열(줄)에 선다.
+      const hub = sibling ? parent! : like
+      const side: Side = sibling
+        ? (like.x >= hub.x + hub.w ? 'right' : like.x + like.w <= hub.x ? 'left' : like.y >= hub.y + hub.h ? 'down' : 'up')
+        : kind
+      // **고른 상자 기준으로만 놓는다 — 다른 상자는 안 움직인다**(2026-10-07 2차 5·6번 · canvas/placeNext). 전에는 붙일 때마다 트리를
+      // 다시 앉혔다(seatTree) — 사용자: 「도형을 어느 위치로 이동 후 다시 스페이스나 엔터를 누르면 재정렬됨. 그런 현상은 없도록」.
+      const at = nextSpot(hub, side, visible, { w: node.w, h: node.h })
+      node.x = at.x; node.y = at.y
+      // 선은 부모에서 새 상자로 — 옆으로 붙였으면 가로 축, 아래 · 위로 붙였으면 세로 축에서 늘 나간다(connPath · 불편점 5번).
+      // **형제는 고른 상자의 선 바로 뒤(앞 형제는 바로 앞)에 끼운다** — 줄 순서는 선 순서를 따른다(방향키 옮겨 가기 · 열 순서 · treeShape.kids).
+      const nc: Conn = { from: hub.id, to: id, ...TREE_CONN, axis: side === 'right' || side === 'left' ? 'h' : 'v' }
+      const at0 = sibling ? p.conns.findIndex((c) => c && c.to === like.id) : -1
+      const cut = at0 < 0 ? p.conns.length : kind === 'before' ? at0 : at0 + 1
+      const conns: Conn[] = [...p.conns.slice(0, cut), nc, ...p.conns.slice(cut)]
+      // 선이 하나도 없던 상자에서 시작했으면 명단에 적는다 — 그래야 이 쪽이 트리 쪽으로 읽혀(isTreePage) 방향키 · 가지째 지우기 · 접기 키가 듣는다.
+      const member = known.includes(hub.id) || shape0.members.includes(hub.id)
+      const roots = member ? known : [...known, hub.id]
+      // 명단이 비어 있으면(손으로 이은 쪽에서 처음 붙였다) 지금의 뿌리를 적는다 — 그래야 이 쪽이 트리 쪽으로 읽힌다.
+      const marked = roots.length ? roots : treeShape([...p.els, node], conns, known).roots
+      let els = [...p.els, node]
+      // **같은 열의 자식들은 부모 가운데에**(2026-10-07 3차 · 사용자: 「자식 7개 정도까지는 가능한한 중간에 위치 … 지금은 축 쳐져서 밑으로 내려가는 느낌」).
+      // 부모 옆 열(nextSpot 이 놓는 x)에 선 자식들(새 상자 포함)만 — 손으로 다른 데로 옮긴 자식은 안 건드린다. 형제는 고른 상자 **바로 뒤**(앞 형제는 바로 앞)에 끼운다.
+      if (side === 'right' || side === 'left') {
+        const shape2 = treeShape(els, conns, known)
+        const byId = new Map(els.map((e) => [e.id, e]))
+        const inCol = (k: FreeEl) => (side === 'right' ? Math.abs(k.x - (hub.x + hub.w + GAP_SIDE)) <= 1 : Math.abs(k.x + k.w - (hub.x - GAP_SIDE)) <= 1)
+        const col = (shape2.kids.get(hub.id) || []).map((kid) => byId.get(kid)).filter((k): k is FreeEl => !!k && !k.hidden && inCol(k) && k.id !== id).sort((x, y) => x.y - y.y)
+        const i = col.findIndex((k) => k.id === like.id)
+        const order = kind === 'sibling' && i >= 0 ? [...col.slice(0, i + 1), node, ...col.slice(i + 1)]
+          : kind === 'before' && i >= 0 ? [...col.slice(0, i), node, ...col.slice(i)]
+          : [...col, node]
+        els = arrangeColumn(els, shape2, hub, order)
+      }
+      return { ...p, els, conns, treeRoots: marked, treeRoot: marked[0] ?? p.treeRoot, treeDir: p.treeDir || 'LR' }
     }) }
   }),
   treeRemove: (pageId, elId) => set((s) => {
@@ -466,18 +479,26 @@ export const useBuilder = create<BuilderState>((set, get) => ({
       const els = p.els.filter((e) => !gone.has(e.id))
       const conns = p.conns.filter((c) => !gone.has(c.from) && !gone.has(c.to))
       const roots = known.filter((id) => !gone.has(id))
-      const laid = seatTree(els, conns, p.treeDir || 'LR', roots)
-      claimIds(laid.els)
-      return { ...p, els: laid.els, conns: laid.conns, treeDir: laid.dir, treeRoots: roots, treeRoot: roots[0] }
+      // 다시 앉히지 않는다(2026-10-07 2차 6번 「재정렬 없음」) — 남은 상자는 제자리.
+      return { ...p, els, conns, treeRoots: roots, treeRoot: roots[0] }
     }) }
   }),
   treeFold: (pageId, elId) => set((s) => {
     return { pages: mapPage(s.pages, pageId, (p) => {
       const known = p.treeRoots || (p.treeRoot != null ? [p.treeRoot] : [])
       const els = p.els.map((e) => (e.id === elId ? { ...e, folded: !e.folded } : e))
-      const laid = seatTree(els, p.conns, p.treeDir || 'LR', known)
-      claimIds(laid.els)
-      return { ...p, els: laid.els, conns: laid.conns, treeDir: laid.dir }
+      // **자리는 안 옮긴다 — 접힘 표시와 숨김만 다시 쓴다**(2026-10-07 · 불편점 10번 · 2차 6번 「재정렬 없음」). 머메이드로 펼쳤든
+      // 손으로 이었든 같다 — 다시 앉히면 손으로 놓은 자리(= 그림)가 망가진다.
+      const shape = treeShape(els, p.conns, known)
+      // 아래 띠의 흐린 상자(echo)는 제 원본을 따른다 — 원본이 숨거나 접히면 같이 숨는다(그 아래가 다 숨었는데 혼자 남으면 고아처럼 보인다).
+      // 전에는 다시 앉히면서 echo 를 새로 만들어 이 일이 저절로 됐다.
+      const byId = new Map(els.map((e) => [e.id, e]))
+      const hid = (e: FreeEl) => {
+        if (e.echoOf == null) return shape.hidden.has(e.id)
+        const o = byId.get(e.echoOf)
+        return !o || shape.hidden.has(o.id) || !!o.folded
+      }
+      return { ...p, els: els.map((e) => (!!e.hidden === hid(e) ? e : { ...e, hidden: hid(e) || undefined })) }
     }) }
   }),
   updateConn: (pageId, index, bend) => set((s) => ({ pages: mapPage(s.pages, pageId, (p) => ({ ...p, conns: p.conns.map((c, i) => (i === index ? { ...c, bend } : c)) })) })),

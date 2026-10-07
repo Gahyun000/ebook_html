@@ -30,6 +30,12 @@ export interface TreeParts {
 
 /** 상자 한 칸. 마인드맵 가지와 같은 크기라 눈에 익다. */
 export const NODE_W = 132, NODE_H = 38
+/**
+ * **트리 선 한 벌**(2026-10-07 · EverSketch 불편점 8번). 키(treeAdd) · 머메이드(treeParts) · ＋점 · 「→ 연결」 이 모두 이것을 쓴다.
+ * 사용자 결정: 기본 연결선 `#8b93a5` · 2px — ＋점으로 그은 선(화면 기본값)과 Space 로 그은 선(연한 회색 · 1.5px)이 달랐다.
+ * 여기(treeEls)에 두는 까닭: treeOps 가 treeEls 를 import 하므로 반대로 두면 돌림 참조가 된다. treeOps 는 다시 내보낸다.
+ */
+export const TREE_CONN: Omit<Conn, 'from' | 'to'> = { kind: 'ortho', arrow: 'end', color: '#8b93a5', width: 2 }
 /** 왼→오른: 레벨 간격 · 줄 간격.  위→아래: 형제 간격 · 레벨 간격. */
 export const LR_COL = 192, LR_ROW = 56
 export const TD_COL = 156, TD_ROW = 88
@@ -209,8 +215,7 @@ export function treeParts(g: MmGraph, W: number, H: number, id: () => number,
   // 화살촉을 붙인다 — 마인드맵과 달리 트리는 **방향이 있는 관계**다.
   const conns: Conn[] = g.edges
     .filter((e) => mine[e.from] != null && mine[e.to] != null && e.from !== e.to)
-    .map((e) => ({ from: mine[e.from], to: mine[e.to], kind: 'ortho' as const,
-                   arrow: 'end' as const, color: '#b9c2d4', width: 1.5 }))
+    .map((e) => ({ from: mine[e.from], to: mine[e.to], ...TREE_CONN }))
 
   const rootKey = g.order.find((k) => depth[k] === 0) || g.order[0]
   return { els, conns, rootId: mine[rootKey] ?? (els[0]?.id ?? 0), dir: d }

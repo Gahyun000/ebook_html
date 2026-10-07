@@ -343,7 +343,8 @@ export function layoutTree(
       color: ECHO_COLOR, tcolor: ECHO_TCOLOR, folded: undefined, hidden: undefined,
     })
     for (const k of pl.kids) {
-      outConns.push({ from: id, to: k, kind: 'ortho', arrow: 'end', color: '#b9c2d4', width: 1.5 })
+      // 2026-10-07 2차 4번: 흐린 이음도 같은 벌 — 「머메이드라고 되어있는 부분 또한 화살표의 굵기 및 색상을 현재의 화살표에 맞게」.
+      outConns.push({ from: id, to: k, ...TREE_CONN })
     }
   })
 
@@ -366,8 +367,9 @@ export function newNode(id: number, text: string): FreeEl {
            text, color: '#eaf0ff', fs: 13, tcolor: '#1c2433' }
 }
 
-export const TREE_CONN: Omit<Conn, 'from' | 'to'> =
-  { kind: 'ortho', arrow: 'end', color: '#b9c2d4', width: 1.5 }
+// 트리 선 한 벌은 treeEls 에 있다(돌림 참조를 피하려고 · 2026-10-07). 여기서 다시 내보낸다 — 스토어 · 화면 · 검사가 이 길로 가져간다.
+import { TREE_CONN } from './treeEls'
+export { TREE_CONN }
 
 /** 쪽에 적어 둔 명단. 옛 문서는 `treeRoot` 하나만 들고 있다. */
 export function knownOf(page: { treeRoot?: number; treeRoots?: number[] }): number[] {

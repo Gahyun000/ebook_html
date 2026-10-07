@@ -3,7 +3,7 @@ import { useKey } from '../../ui/keyLabel'
 import type { Tool } from '../../state/canvasUI'
 import { useSelEl } from '../useSelEl'
 import ColorPicker from './ColorPicker'
-import { NO_FILL, pushSnap } from '../../canvas/model'
+import { NO_FILL, NO_CPT, pushSnap } from '../../canvas/model'
 import { SHAPE_RADIUS, polyClip } from '../../canvas/shapePaths'
 import { cellColors } from '../../canvas/cellColor'
 import { ALIGN_LABEL, AlignIcon } from '../../ui/alignIcons'
@@ -45,7 +45,7 @@ const SHAPE_CATS: { cat: string; items: { t: Tool; label: string }[] }[] = [
     { t: 'chevron', label: '갈매기(진행)' },
   ] },
 ]
-const SHAPES: { t: Tool; label: string }[] = SHAPE_CATS.flatMap((c) => c.items)
+export const SHAPES: { t: Tool; label: string }[] = SHAPE_CATS.flatMap((c) => c.items)
 
 /** **고르면 바로 놓는 것**(EVER-SKETCH1 90e7439). 고르기·연결선은 여기 없다 — 그 둘은 누를 자리가 뜻이 있다. */
 const PLACE_TOOLS: Tool[] = ['text', 'table', 'wordart']
@@ -316,6 +316,25 @@ function ConnTools() {
   )
 }
 
+/**
+ * **동작 묶음**(2026-10-07 · 2차 3번). 고른 상자 위에 떠 있던 서식 막대(ctxbar)를 걷고 여기로 옮겼다 — 막대가 윗줄 상자를 가려
+ * 「도형을 선택하고, 특정 부분에서 클릭해도 반응하지 않는 부분」 이 됐다(끌기도 안 됐다). 도구줄은 늘 같은 자리라 아무것도 안 가린다.
+ * 하는 일은 그대로 캔버스 · 명령 훅이 받는다(ebook:connect-from · dup · z-front · z-back · del).
+ */
+function ActionTools({ connect }: { connect: boolean }) {
+  const emit = (name: string) => window.dispatchEvent(new CustomEvent(name))
+  return (
+    <span className="ax-grp gs" title="동작">
+      <span className="lab">동작</span>
+      {connect ? <button className="ib" title="이 도형에서 연결(화살표)" onClick={() => emit('ebook:connect-from')}>→</button> : null}
+      <button className="ib" title="복제" onClick={() => emit('ebook:dup')}>⧉</button>
+      <button className="ib" title="맨 앞으로" onClick={() => emit('ebook:z-front')}>▲</button>
+      <button className="ib" title="맨 뒤로" onClick={() => emit('ebook:z-back')}>▼</button>
+      <button className="ib" title="삭제" onClick={() => emit('ebook:del')}>🗑</button>
+    </span>
+  )
+}
+
 function TableTools() {
   const { el, patch } = useSelEl()
   const tableSel = useCanvasUI((s) => s.tableSel)
@@ -542,6 +561,8 @@ export default function EditToolbar() {
      {/* **자리는 고정, 내용만 바뀐다.** 표면 표 도구, 글상자·도형이면 글자·색 도구, 연결선이면 선 도구. */}
      <div className="ax-tbrow ctx">
       {ctx === 'text' ? <TextTools /> : ctx === 'conn' ? <ConnTools /> : <TableTools />}
+      {/* 표는 뺀다 — 표 줄은 이미 길어서 묶음을 더하면 1440px 에서 두 줄로 꺾이고, 작업면 높이가 흔들린다(스모크 3단계 표 높이). 표의 복제 · 삭제는 메뉴 · 키로. */}
+      {ctx === 'text' && el ? <ActionTools connect={!NO_CPT.includes(el.type)} /> : null}
      </div>
     </div>
   )

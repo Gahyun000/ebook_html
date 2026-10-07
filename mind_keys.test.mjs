@@ -83,16 +83,18 @@ const ev = (key, more = {}) => ({ key, code: '', shiftKey: false, altKey: false,
   check(/mindmapCenter != null/.test(hk), '마인드맵 카드 쪽은 가로채지 않는다')
   // 2026-10-07: 붙이는 일은 mindActions.addTopic 한 곳에 있다 — Hotkeys 와 FreeLayer(붙인 직후의 글칸)가 같이 쓴다.
   const ma = bare(readFileSync('./src/builder/mindActions.ts', 'utf8'))
-  check(/addTopic\(mind\.page\.id, mind\.id, act\)/.test(hk), 'Hotkeys 는 addTopic 으로 붙인다')
-  check(/pushSnap\(/.test(ma) && /requestEdit\(/.test(ma) && /setReveal\(/.test(ma) && /treeAdd\(/.test(ma),
-    'addTopic 이 되돌리기를 남기고 · 붙이고 · 글 편집을 열고 · 화면에 보이게 한다')
+  // 2026-10-07 2차(5·6번): addTopic → addNext. Space = 오른쪽 · Enter = 아래 · Shift+Enter = 위, 허브(고른 상자)를 기억한다(place_next.test.mjs).
+  // 3차(사용자 「엔터는 형제, 스페이스는 자식」): Space = 자식(right) · Enter = sibling · Shift+Enter = before. 허브 기억은 뺐다.
+  check(/addNext\(mind\.page\.id, mind\.id, act === 'child' \? 'right' : act\)/.test(hk), 'Hotkeys 는 addNext 로 붙인다(자식 · 형제 · 앞 형제)')
+  check(/pushSnap\(/.test(ma) && /requestEdit\(/.test(ma) && /setReveal\(/.test(ma) && /treeAdd\(/.test(ma) && !/setHub\(/.test(ma),
+    'addNext 가 되돌리기를 남기고 · 붙이고 · 글 편집을 열고 · 화면에 보이게 한다')
   const fl = bare(readFileSync('./src/canvas/FreeLayer.tsx', 'utf8'))
   check(/editReq/.test(fl) && /requestEdit\(null\)/.test(fl), 'FreeLayer 가 편집 부탁을 받고 비운다')
   check(/isComposingKey\(e\)/.test(fl.slice(fl.indexOf('className="feltext" contentEditable'), fl.indexOf('className="feltext" contentEditable') + 6000)),
     '글칸의 Enter 는 한글 조합 중이면 건너뛴다')
   // **붙인 직후에는 글칸에서도 가지 키가 듣는다** — 빈 곳을 누르고 도형을 다시 고를 일이 없다(화면 기록 2026-10-07).
   const txt = fl.slice(fl.indexOf('className="feltext" contentEditable'), fl.indexOf('className="feltext" contentEditable') + 6000)
-  check(/pristineRef\.current === el\.id/.test(txt) && /addTopic\(page\.id, tid, act\)/.test(txt), '아무것도 안 친 글칸에서 Space · Enter 가 가지를 붙인다')
+  check(/pristineRef\.current === el\.id/.test(txt) && /addNext\(page\.id, tid, act === 'child' \? 'right' : act\)/.test(txt), '아무것도 안 친 글칸에서 Space = 자식 · Enter = 형제가 붙는다')
   check(/onInput=\{\(\) => \{ pristineRef\.current = null \}\}/.test(txt) && /onCompositionStart=\{\(\) => \{ pristineRef\.current = null \}\}/.test(txt),
     '**글이 들어오면 푼다** — 그 뒤 Space 는 띄어쓰기, Enter 는 이름 확정이다(한글 조합 시작 포함)')
   check(/editRef\.current\.node === e\.currentTarget/.test(txt), '앞 상자의 늦은 blur 가 새 상자의 편집을 끄지 않는다')

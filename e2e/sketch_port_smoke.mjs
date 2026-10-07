@@ -34,11 +34,20 @@ const thumbs = p.locator('.axth-list .axth')
 const onIndex = () => p.evaluate(() => Array.from(document.querySelectorAll('.axth-list .axth')).findIndex((n) => n.classList.contains('on')))
 const layer = () => p.locator('.stage .freelayer:not(.off)').first()
 
-/** 캔버스에 글상자 하나를 놓고 고른 채로 둔다.
- *  4단계(EVER-SKETCH1 90e7439)부터 T 는 **누르는 즉시** 종이 한가운데에 놓고 커서까지 넣는다 —
- *  캔버스를 한 번 더 누르던 걸음이 없어졌다. (인자는 옛 호출과 맞추려고 남겨 둔다.) */
-async function placeText(_dx = 200, _dy = 160) {
+/** 캔버스에 글상자 하나를 놓고 고른 채로 둔다(커서까지).
+ *  2026-10-07(사용자 결정 · EverSketch 불편점 6번)부터 T 는 **무장**이고, 빈 곳을 찍은 자리(가운데)에 놓인다 — 그래서 (dx, dy) 를
+ *  다시 쓴다(종이 논리 좌표). 4단계(90e7439) 때는 「누르는 즉시 한가운데」 였다. */
+/** 표를 **종이 가운데**에 놓는다 — 2026-10-07 부터 「표」 단추도 무장이라 빈 곳을 찍어야 한다(예전 centerSpot 의 한가운데와 같은 자리). */
+async function placeTable() {
+  await p.locator('.ib[title="표"]').first().click(); await p.waitForTimeout(150)
+  const lb = await layer().boundingBox()
+  await p.mouse.click(lb.x + lb.width / 2, lb.y + lb.height / 2); await p.waitForTimeout(300)
+}
+async function placeText(dx = 200, dy = 160) {
   await p.locator('.ib[title="텍스트"]').first().click()
+  await p.waitForTimeout(150)
+  const lb = await layer().boundingBox(); const z = lb.width / parseFloat(await layer().evaluate((n) => n.style.width))
+  await p.mouse.click(lb.x + dx * z, lb.y + dy * z)
   await p.waitForTimeout(250)
 }
 
@@ -238,7 +247,7 @@ STAGES.push(['2단계 · 표 칸 끌기 · ⠿ 이동 · 다시 열기', async (
   const tblFel = () => layer().locator('.fel:has(.feltable)').first()
   const lb = await layer().boundingBox()
   // 4단계(90e7439)부터 표 단추는 **누르는 즉시** 한가운데에 놓는다 — 캔버스를 한 번 더 누르지 않는다.
-  await p.locator('.ib[title="표"]').first().click()
+  await placeTable()
   await p.waitForTimeout(300)
   ok('[표] 표가 놓였다', (await layer().locator('.feltable').count()) === 1)
 
@@ -318,7 +327,7 @@ STAGES.push(['3단계 · 표 편집 · 한글 입력', async () => {
   const lb = await layer().boundingBox()
   const blank = { x: lb.x + lb.width - 15, y: lb.y + lb.height - 15 }
 
-  await p.locator('.ib[title="표"]').first().click()   // 4단계부터 누르는 즉시 놓인다
+  await placeTable()   // 2026-10-07 부터 표도 무장 → 가운데를 찍어 놓는다
   await p.waitForTimeout(300)
   ok('[표3] 표가 놓였다', (await layer().locator('.feltable').count()) === 1)
 
@@ -476,9 +485,11 @@ STAGES.push(['4단계 · PPT 식 도구줄 · 표 채우기 · 새 슬라이드 
   const fels = () => layer().locator('.fel')
   const ctxRow = p.locator('.ax-tbrow.ctx')
   const grp = (name) => ctxRow.locator(`.ax-grp[title="${name}"]`)
-  async function pickShape(label) {
+  /** 도형을 고르고 **빈 곳(비율 좌표)을 찍어** 놓는다 — 2026-10-07 부터 고르면 무장이다. */
+  async function pickShape(label, fx = 0.62, fy = 0.55) {
     await p.locator('.ib.shp-btn').first().click(); await p.waitForTimeout(150)
-    await p.locator(`.shp-pop .shp-cell[title="${label}"]`).click(); await p.waitForTimeout(250)
+    await p.locator(`.shp-pop .shp-cell[title="${label}"]`).click(); await p.waitForTimeout(150)
+    await p.mouse.click(lb.x + lb.width * fx, lb.y + lb.height * fy); await p.waitForTimeout(250)
   }
   const lb = await layer().boundingBox()
   const blank = { x: lb.x + lb.width - 12, y: lb.y + lb.height - 12 }
@@ -490,17 +501,25 @@ STAGES.push(['4단계 · PPT 식 도구줄 · 표 채우기 · 새 슬라이드 
     (await p.locator('.ib[title^="펜(두께"]').count()) === 1 && (await p.locator('.ib[title^="지우개"]').count()) === 1)
   await p.locator('.tbtn.draw-toggle').click(); await p.waitForTimeout(150)
 
-  // ① 도형은 고르는 즉시 놓인다 — 캔버스를 한 번 더 누르지 않는다
+  // ① 2026-10-07(사용자 결정 · EverSketch 불편점 6번): 도형을 고르면 **무장**(십자 커서 · 안내 띠)하고, 빈 곳을 찍은 자리(가운데)에 놓인다.
+  //    전에는 「고르는 즉시 한가운데 · 연달아 16px 비껴」(e4dfbfd) 였다.
   const n0 = await fels().count()
-  await pickShape('사각형')
+  await p.locator('.ib.shp-btn').first().click(); await p.waitForTimeout(150)
+  await p.locator('.shp-pop .shp-cell[title="사각형"]').click(); await p.waitForTimeout(200)
+  ok('[찍어 놓기] 도형을 고르면 바로 놓이지 않고 **무장**한다(십자 커서)', (await fels().count()) === n0 && (await layer().evaluate((n) => n.style.cursor)) === 'crosshair')
+  ok('[찍어 놓기] 「빈 곳을 눌러 … Esc 취소」 안내 띠가 뜬다', (await layer().locator('.conn-hint').count()) === 1 && /Esc 취소/.test(await layer().locator('.conn-hint').innerText()))
+  const [lw, lh] = await layer().evaluate((n) => [parseFloat(n.style.width), parseFloat(n.style.height)])
+  const tx = Math.round(lw * 0.8), ty = Math.round(lh * 0.18)                  // 종이 안 빈 곳(세로 종이라 논리 폭이 432)
+  await p.mouse.click(lb.x + lb.width * (tx / lw), lb.y + lb.height * (ty / lh)); await p.waitForTimeout(250)
   const n1 = await fels().count()
-  ok('[바로 놓기] 도형을 고르면 캔버스를 안 눌러도 놓인다', n1 === n0 + 1, `${n0} → ${n1}`)
+  ok('[찍어 놓기] 빈 곳을 찍으면 그 자리에 놓인다', n1 === n0 + 1, `${n0} → ${n1}`)
+  const first = await layer().locator('.fel.box').evaluateAll((ns) => ns.map((n) => [parseFloat(n.style.left), parseFloat(n.style.top), parseFloat(n.style.width), parseFloat(n.style.height)]))
+  ok('[찍어 놓기] 찍은 점이 상자의 **가운데**다', first.length === 1 && Math.abs(first[0][0] + first[0][2] / 2 - tx) <= 1.5 && Math.abs(first[0][1] + first[0][3] / 2 - ty) <= 1.5, `${JSON.stringify(first)} · 찍은 점 ${tx},${ty}`)
   const cur = await layer().evaluate((n) => n.style.cursor)
-  ok('[바로 놓기] 놓고 나면 도구가 고르기로 돌아온다(십자 커서 아님)', cur !== 'crosshair', JSON.stringify(cur))
-  await pickShape('사각형')
+  ok('[찍어 놓기] 놓고 나면 도구가 고르기로 돌아온다(십자 커서 아님 · 띠 사라짐)', cur !== 'crosshair' && (await layer().locator('.conn-hint').count()) === 0, JSON.stringify(cur))
+  await pickShape('사각형', 0.3, 0.7)
   const pos = await layer().locator('.fel.box').evaluateAll((ns) => ns.map((n) => [parseFloat(n.style.left), parseFloat(n.style.top)]))
-  ok('[바로 놓기] 연달아 놓으면 16px 비껴 놓인다', pos.length === 2 && pos[1][0] - pos[0][0] === 16 && pos[1][1] - pos[0][1] === 16,
-    JSON.stringify(pos))
+  ok('[찍어 놓기] 둘째도 찍은 자리에 — 앞 것과 다른 자리', pos.length === 2 && (pos[1][0] !== pos[0][0] || pos[1][1] !== pos[0][1]), JSON.stringify(pos))
 
   // ② 도형을 고르면 둘째 줄에 이름 붙은 「글자 색 · 채우기 · 테두리」
   const labs = await ctxRow.locator('.ax-grp > .lab').evaluateAll((ns) => ns.map((n) => n.textContent))
@@ -549,7 +568,7 @@ STAGES.push(['4단계 · PPT 식 도구줄 · 표 채우기 · 새 슬라이드 
 
   // ⑥ 표 채우기 — 위 도구줄에서 (새 슬라이드에서)
   await thumbs.nth(0).click(); await p.keyboard.press('Enter'); await p.waitForTimeout(300)
-  await p.locator('.ib[title="표"]').first().click(); await p.waitForTimeout(300)
+  await placeTable()
   const tblFel = () => layer().locator('.fel:has(.feltable)').first()
   const cell = (r, c) => tblFel().locator(`.feltd[data-r="${r}"][data-c="${c}"]`)
   ok('[표 채우기] 칸을 안 고르면 채우기가 잠겨 있다',
@@ -678,7 +697,8 @@ STAGES.push(['5단계 · 오른쪽 패널 접이식 묶음', async () => {
 
   // ── 도형을 고르면 ──
   await p.locator('.ib.shp-btn').first().click(); await p.waitForTimeout(150)
-  await p.locator('.shp-pop .shp-cell[title="사각형"]').click(); await p.waitForTimeout(300)
+  await p.locator('.shp-pop .shp-cell[title="사각형"]').click(); await p.waitForTimeout(150)
+  await p.mouse.click(lb.x + lb.width * 0.6, lb.y + lb.height * 0.55); await p.waitForTimeout(300)   // 2026-10-07: 고르면 무장 — 빈 곳을 찍어 놓는다
   ok('[패널] 탭 막대가 없다', (await p.locator('.insp-tabs').count()) === 0)
   const sa = await accTexts()
   ok('[패널] 도형은 네 묶음(모양 · 색 · 글자 · 크기 · 자리 · 효과 · 순서)',
@@ -755,7 +775,7 @@ STAGES.push(['5단계 · 오른쪽 패널 접이식 묶음', async () => {
 
   // ── 표를 고르면 ──
   await p.mouse.click(blank.x, blank.y); await p.waitForTimeout(150)
-  await p.locator('.ib[title="표"]').first().click(); await p.waitForTimeout(300)
+  await placeTable()
   const tblFel = () => layer().locator('.fel:has(.feltable)').first()
   const cell = (r, c) => tblFel().locator(`.feltd[data-r="${r}"][data-c="${c}"]`)
   const ta = await accTexts()
@@ -792,9 +812,10 @@ STAGES.push(['5단계 · 오른쪽 패널 접이식 묶음', async () => {
   await closeAcc('행')
   await p.mouse.click(blank.x, blank.y); await p.waitForTimeout(150)
   await p.locator('.ib.shp-btn').first().click(); await p.waitForTimeout(150)
-  await p.locator('.shp-pop .shp-cell[title="사각형"]').click(); await p.waitForTimeout(250)
+  await p.locator('.shp-pop .shp-cell[title="사각형"]').click(); await p.waitForTimeout(150)
+  await p.mouse.click(lb.x + lb.width * 0.9, lb.y + lb.height * 0.1); await p.waitForTimeout(250)   // 2026-10-07: 빈 곳(오른쪽 위)을 찍어 놓는다
   ok('[기억] (사전) 도형으로 옮겨 갔다', (await panel.locator('.insp-who-t').innerText()) === '도형')
-  // 도형이 표 가운데에 겹쳐 놓이므로 지우고 표로 돌아간다
+  // 놓은 도형을 지우고 표로 돌아간다
   await p.evaluate(() => { const a = document.activeElement; if (a && a.blur) a.blur() })
   await p.keyboard.press('Delete'); await p.waitForTimeout(200)
   await cell(0, 0).click(); await p.waitForTimeout(250)
@@ -911,10 +932,12 @@ STAGES.push(['6단계 · 마인드맵 요소 · 머메이드 · 다시 열기', 
   ok('[머메이드] 글에 쓴 상자 넷이 요소로 펼쳐진다', (await boxes().count()) === 4, String(await boxes().count()))
   const names = (await boxes().allInnerTexts()).map((t) => t.trim()).sort().join(',')
   ok('[머메이드] 상자 글자가 글과 같다', names === ['개발', '기획', '문서', '설계'].sort().join(','), names)
-  ok('[머메이드] 선(화살표)이 셋', (await layer().locator('svg path[stroke="#b9c2d4"]').count()) === 3)
+  // 2026-10-07: 트리 선이 기본 연결선 색(#8b93a5)으로 통일됐다(불편점 8번) — 색이 아니라 **화살촉**으로 센다.
+  ok('[머메이드] 선(화살표)이 셋', (await layer().locator('svg.freeconn path[marker-end]').count()) === 3)
 
   // ＋ 자식 · ＋ 형제
   await boxes().filter({ hasText: '설계' }).first().click(); await p.waitForTimeout(250)
+  // 2026-10-07 2차(5·6번): 「＋ 자식 · ＋ 형제」 → 「→ 오른쪽에 · ↓ 아래에 · ↑ 위에」 — 고른 상자 기준으로 놓고 다른 상자는 안 움직인다.
   const kid = panel6().locator('.insp-pill', { hasText: '＋ 자식' })
   ok('[머메이드] 상자를 고르면 「＋ 자식」 이 있다', (await kid.count()) === 1)
   await kid.click(); await p.waitForTimeout(300)
@@ -923,8 +946,8 @@ STAGES.push(['6단계 · 마인드맵 요소 · 머메이드 · 다시 열기', 
   await panel6().locator('.insp-pill', { hasText: '＋ 형제' }).click(); await p.waitForTimeout(300)
   ok('[머메이드] ＋ 형제 → 상자 여섯', (await boxes().count()) === 6, String(await boxes().count()))
   await boxes().filter({ hasText: '기획' }).first().click(); await p.waitForTimeout(250)
-  ok('[머메이드] 뿌리를 고르면 「＋ 형제」 가 「＋ 새 뿌리」 로 바뀐다',
-    (await panel6().locator('.insp-pill', { hasText: '＋ 새 뿌리' }).count()) === 1 && (await panel6().locator('.insp-pill', { hasText: '＋ 형제' }).count()) === 0)
+  ok('[머메이드] 뿌리를 골라도 같은 단추(＋ 자식 · ＋ 형제 — 뿌리의 형제는 선 없는 새 뿌리)',
+    (await panel6().locator('.insp-pill', { hasText: '＋ 형제' }).count()) === 1 && (await panel6().locator('.insp-pill', { hasText: '＋ 자식' }).count()) === 1)
 
   // 접기 — 편집 화면에서만
   const folds = layer().locator('.tree-fold')
@@ -1053,7 +1076,8 @@ const BLUE = 'rgb(42, 120, 214)'
 /** 화면 기록에 나온 그림. 가로 종이에서는 아래 띠로 접혀 「개발」 echo 가 하나 생긴다. */
 const VIDEO_MM = 'graph TB\n  A[기획] --> B[설계]\n  B --> C[개발]\n  C --> D{검수}\n  D --> E[배포]\n  D --> B'
 const fels = () => layer().locator('.fel')
-const lines = () => layer().locator('svg path[stroke="#b9c2d4"]')
+// 2026-10-07: 트리 선이 기본 연결선 색(#8b93a5)으로 통일됐다(불편점 8번 · 흐린 이음만 #b9c2d4) — 색이 아니라 **화살촉**으로 센다.
+const lines = () => layer().locator('svg.freeconn path[marker-end]')
 /** 종이 전체를 끌어서 그 위의 것을 전부 고른다. **빈 자리에서 눌러야** 끌어 고르기가 된다 —
  *  트리도 붙인 것도 왼쪽 위 모서리에는 안 놓인다. */
 async function selectAllOnPaper() {
@@ -1186,8 +1210,7 @@ STAGES.push(['7단계 · 여럿을 선과 함께 복사 · 붙여넣기', async 
   ok('[트리 쪽] 붙인 흐린 상자는 여기서도 「다시 놓은 부모」 다', /다시 놓은 부모/.test(await panel6().innerText()))
   if (SHOT_DIR) await p.locator('.stage').first().screenshot({ path: SHOT_DIR + '/s7/stage7_tree_pasted.png' })
   await deselect()
-  /** 첫 「기획」(원본 뿌리)의 접기 손잡이를 누른다 — 접든 펴든 **쪽 전체가 다시 앉는다.**
-   *  앉을 때마다 자리가 바뀌므로 매번 다시 찾는다(6단계 toggleRoot 와 같은 길). */
+  /** 첫 「기획」(원본 뿌리)의 접기 손잡이를 누른다(6단계 toggleRoot 와 같은 길). 2026-10-07 2차 6번부터 접든 펴든 **자리는 그대로**다. */
   async function toggleFirstRoot() {
     const rb = await layer().locator('.fel', { hasText: '기획' }).first().boundingBox()
     const fb = await layer().locator('.tree-fold').evaluateAll((ns) => ns.map((n) => { const r = n.getBoundingClientRect(); return { x: r.x, y: r.y } }))
@@ -1195,24 +1218,18 @@ STAGES.push(['7단계 · 여럿을 선과 함께 복사 · 붙여넣기', async 
     const near = fb.reduce((a2, q) => (d(q) < d(a2) ? q : a2), fb[0])
     await p.mouse.click(near.x + 6, near.y + 6); await p.waitForTimeout(350)
   }
-  await toggleFirstRoot()                       // 접는다
-  await toggleFirstRoot()                       // 편다 — 붙인 것까지 한꺼번에 다시 앉는다
-  const after = (await fels().allInnerTexts()).map((t) => t.trim())
-  ok('[트리 쪽] 다시 앉혀도 **두 그림이 다 남는다**',
-    ['기획', '설계', '검수', '배포'].every((t) => after.filter((a) => a === t).length === 2), after.join(','))
-  // 2026-10-07 고침: 전에는 「상자 열 + 흐린 것 둘 = 열둘 · 개발 넷」 이었다. 이제 접거나 가지를 붙여 다시 앉히면 **아래 띠를 펴서**
-  // 옆으로 뻗는다(흐린 「다시 놓은 부모」 가 없어진다 — tree_keys.test.mjs 5번). 본뜻은 그대로다: 붙인 흐린 상자가
-  // 진짜 상자로 굳었다면 「개발」 이 셋이 되고 상자가 열하나가 된다.
-  ok('[트리 쪽] 「개발」 은 둘이다 — 상자 열 · 흐린 것 없음(붙인 흐린 상자가 진짜 상자로 굳지 않는다)',
-    after.length === 10 && after.filter((a) => a === '개발').length === 2, `${after.length}개 · 개발 ${after.filter((a) => a === '개발').length}`)
-  ok('[트리 쪽] 다시 앉힌 뒤에도 선이 열 그대로다', (await lines().count()) === 10, String(await lines().count()))
-  const rects = await fels().evaluateAll((ns) => ns.map((n) => { const r = n.getBoundingClientRect(); return [r.left, r.top, r.right, r.bottom] }))
-  let over = 0
-  for (let i = 0; i < rects.length; i++) for (let j = i + 1; j < rects.length; j++) {
-    const a = rects[i], c = rects[j]
-    if (a[0] < c[2] - 1 && c[0] < a[2] - 1 && a[1] < c[3] - 1 && c[1] < a[3] - 1) over++
-  }
-  ok('[트리 쪽] 다시 앉힌 두 그림이 **서로 안 겹친다**', over === 0, `겹친 쌍 ${over} · 상자 ${rects.length}`)
+  const beforeFold = await fels().evaluateAll((ns) => ns.map((n) => [n.textContent.trim(), n.style.left, n.style.top]))
+  await toggleFirstRoot()                       // 접는다 — 원본 뿌리 아래(흐린 상자까지)만 숨는다 · **아무것도 다시 앉지 않는다**(2026-10-07 2차 6번)
+  const folded = (await fels().allInnerTexts()).map((t) => t.trim())
+  ok('[트리 쪽] 원본 뿌리를 접으면 그 아래(흐린 상자 포함)만 숨고 붙인 사본은 그대로다', folded.length === 7 && folded.filter((a) => a === '기획').length === 2 && folded.filter((a) => a === '개발').length === 2, `${folded.length}개 · ${folded.join(',')}`)
+  await toggleFirstRoot()                       // 편다
+  const after = await fels().evaluateAll((ns) => ns.map((n) => [n.textContent.trim(), n.style.left, n.style.top]))
+  // 2026-10-07 2차 고침: 전에는 접었다 펴면 쪽 전체가 다시 앉아 「상자 열 · 흐린 것 없음 · 두 그림이 안 겹침」 을 봤다. 이제 **자리는 그대로**다 —
+  // 붙인 사본은 붙여넣기가 늘 하듯 20px 비껴 원본 위에 놓이고(겹치는 것이 맞다), 사용자가 끌어 옮긴다. 흐린 상자도 사본의 것 그대로 남는다.
+  ok('[트리 쪽] 접었다 펴도 **두 그림이 다 남고 아무것도 다시 앉지 않는다**(열둘 · 자리 그대로)', JSON.stringify(after) === JSON.stringify(beforeFold) && after.length === 12, `${after.length}개`)
+  ok('[트리 쪽] 선도 열 그대로다', (await lines().count()) === 10, String(await lines().count()))
+  const rects = await fels().evaluateAll((ns) => ns.map((n) => [parseFloat(n.style.left), parseFloat(n.style.top)]))
+  ok('[트리 쪽] 붙인 사본은 원본에서 **20px 비껴** 놓였다(재정렬 없음 · 붙여넣기의 늘 하는 일)', rects.length === 12 && rects.slice(6).every((r) => rects.slice(0, 6).some((o) => o[0] + 20 === r[0] && o[1] + 20 === r[1])), JSON.stringify(rects))
   if (SHOT_DIR) { await deselect(); await p.locator('.stage').first().screenshot({ path: SHOT_DIR + '/s7/stage7_tree_reseated.png' }) }
 }])
 
@@ -1308,7 +1325,8 @@ STAGES.push(['8단계 · 한글 조합 중 Enter', async () => {
 
   // ③ 표 칸 — 영문과 같이 아래 칸만 골라야 한다(편집 상태로 열리면 안 된다)
   await p.locator('.ax-menu .ax-mwrap button.m', { hasText: '삽입' }).click(); await p.waitForTimeout(200)
-  await p.locator('.ax-mdrop .ax-mitem', { hasText: '표' }).click(); await p.waitForTimeout(500)
+  await p.locator('.ax-mdrop .ax-mitem', { hasText: '표' }).click(); await p.waitForTimeout(200)
+  { const lb8 = await layer().boundingBox(); await p.mouse.click(lb8.x + lb8.width / 2, lb8.y + lb8.height / 2); await p.waitForTimeout(500) }   // 2026-10-07: 메뉴의 표도 무장 → 가운데를 찍어 놓는다
   const cells = () => layer().locator('.fel.table').first().evaluate((t) => {
     const cs = Array.from(t.querySelectorAll('.feltd'))
     return { t01: cs.find((c) => c.getAttribute('data-rc') === '0_1').innerText, editing: cs.filter((c) => c.getAttribute('contenteditable') === 'true').length,
@@ -1611,7 +1629,7 @@ STAGES.push(['13단계 · 작업면 · 가지 키', async () => {
   if (SHOT_DIR) await p.screenshot({ path: SHOT_DIR + '/s9/stage13_present.png' })
   await p.keyboard.press('Escape'); await p.waitForTimeout(300)
 
-  // ── 알마인드식 가지 키 ──
+  // ── 알마인드식 가지 키(2026-10-07 3차: 2차의 허브 판을 걷고 되살림 — Space 자식 · Enter 형제 · 자리는 안 옮기되 같은 열은 부모 가운데에) ──
   await deselect()
   await layer().locator('.fel').first().click(); await p.waitForTimeout(200)
   await p.keyboard.press('Space'); await p.waitForTimeout(450)
@@ -1653,7 +1671,7 @@ STAGES.push(['13단계 · 작업면 · 가지 키', async () => {
   // 첫 자식은 파란 ＋ 점으로 먼저 붙인 상자(맨 윗줄)다. 거기서 ↓ 가 alpha.
   await p.keyboard.press('ArrowRight'); await p.waitForTimeout(200)
   const selTop = await p.locator('.stage .fel.sel').first().evaluate((n) => parseFloat(n.style.top)).catch(() => -1)
-  ok('[가지 키] → = **첫 자식**(맨 윗줄 상자)', selTop === Math.min(...before.filter((v) => v[0] > 24).map((v) => v[1])), String(selTop))
+  ok('[가지 키] → = **첫 자식**(맨 윗줄 상자)', selTop === Math.min(...before.filter((v) => v[0] > sp[0][0] + sp[0][2]).map((v) => v[1])), String(selTop))
   await p.keyboard.press('ArrowDown'); await p.waitForTimeout(200)
   ok('[가지 키] ↓ = 그 아래 형제(alpha)', (await selText()).trim() === 'alpha', await selText())
   await p.keyboard.press('Alt+ArrowRight'); await p.waitForTimeout(200)
@@ -1693,6 +1711,7 @@ STAGES.push(['13단계 · 작업면 · 가지 키', async () => {
 // 2026-10-07 · 화면 기록 오전 10.57.49 — ① 상자가 제자리에서 시작하지 않고 모양이 바뀜 ② 넷째 단부터 「새 트리」(아래 띠)
 // ③ 자식을 붙일 때마다 빈 곳 → 도형 → Space. 이제 **제자리 · 모양 그대로 · 접지 않고 계속 뻗고 · 마우스 없이 이어 붙인다**(tree_keys.test.mjs).
 STAGES.push(['13단계 · 넷째 단(영상의 그림)', async () => {
+  // 2026-10-07 3차: 알마인드 판(Space 자식 · Enter 형제)으로 되돌림. 자리는 안 옮기고 같은 열의 형제들만 부모 가운데에 맞춰 선다(tree_keys.test.mjs).
   await freshBook()
   await deselect()
   await panel6().locator('.insp-row.seg button', { hasText: '가로' }).click(); await p.waitForTimeout(350)
@@ -1747,6 +1766,213 @@ STAGES.push(['13단계 · 넷째 단(영상의 그림)', async () => {
   ok('[뿌리에서 Enter] 선 없는 **또 하나의 뿌리**가 아래에 생긴다(뿌리와 같은 x · 더 아래)', v4.length === 9 && v4[8][0] === v4[0][0] && v4[8][1] > v4[0][1]
     && (await layer().locator('svg.freeconn path[marker-end]').count()) === lines0, JSON.stringify([v4[0], v4[8]]))
   ok('[뿌리에서 Enter] 겹침 없음', overlaps(v4) === 0, String(overlaps(v4)))
+}])
+
+// ── 14단계 ────────────────────────────────────────────────
+// 2026-10-07 · **도형 기반 마인드맵 UX**(EverSketch 불편점 1~10 · 사용자 결정 넷 — 6번 전부 찍어 놓기 · 7번 연결 모드 · 8번 #8b93a5/2 · 배치는 자동 정렬).
+// 고치기 전 재현(HEAD dist): 2·3번은 f067e4b 에서 이미 고쳐져 있었고, 5(먼 자식 선이 위·아래에서) · 1(Esc 가 선택까지 풂) · 4(종이 밖) ·
+// 7(빈 곳 클릭) · 8(#b9c2d4/1.5 vs #8b93a5/2) · 10(＋점 그림에 접기 없음)이 재현됐다. 여기서는 고친 뒤의 모습을 본다.
+if (SHOT_DIR) { const fs = await import('node:fs'); fs.mkdirSync(SHOT_DIR + '/s14', { recursive: true }) }
+STAGES.push(['14단계 · 도형 UX(불편점 1~10)', async () => {
+  await freshBook()
+  await deselect()
+  await panel6().locator('.insp-row.seg button', { hasText: '가로' }).click(); await p.waitForTimeout(350)
+  const spots = () => layer().locator('.fel').evaluateAll((ns) => ns.map((n) => ({ x: parseFloat(n.style.left), y: parseFloat(n.style.top), w: parseFloat(n.style.width), h: parseFloat(n.style.height), bg: getComputedStyle(n).backgroundColor, t: n.textContent.trim() })))
+  const newSlide = async () => { await thumbs.first().click(); await p.keyboard.press('Enter'); await p.waitForTimeout(350); await deselect() }
+  const geo = async () => { const lb = await layer().boundingBox(); return { lb, z: lb.width / parseFloat(await layer().evaluate((n) => n.style.width)) } }
+  const placeBox = async (x, y) => { const { lb, z } = await geo(); await p.keyboard.press('r'); await p.mouse.click(lb.x + x * z, lb.y + y * z); await p.waitForTimeout(250) }
+  const selCount = () => p.locator('.stage .fel.sel').count()
+  const editing = () => p.evaluate(() => !!document.activeElement && document.activeElement.isContentEditable)
+  const lines = () => layer().locator('svg.freeconn path[marker-end]')
+  const strokes = () => lines().evaluateAll((ns) => [...new Set(ns.map((n) => n.getAttribute('stroke') + '/' + n.getAttribute('stroke-width')))])
+  const starts = () => lines().evaluateAll((ns) => ns.map((n) => n.getAttribute('d').match(/^M ([\d.-]+) ([\d.-]+)/).slice(1).map(Number)))
+  const dotsAt = () => layer().locator('.cpt').evaluateAll((ns) => ns.map((n) => { const r = n.getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2] }))
+
+  // ── 2 · 3번: 옮겨 둔 상자에서 Space 를 이어 눌러도 제자리 · 흐린 상자 없음 ──
+  await placeBox(120, 240)
+  { const s0 = (await spots())[0]; const { lb, z } = await geo(); const cx = s0.x + s0.w / 2, cy = s0.y + s0.h / 2
+    await p.mouse.move(lb.x + cx * z, lb.y + cy * z); await p.mouse.down(); await p.mouse.move(lb.x + (cx + 140) * z, lb.y + (cy + 60) * z, { steps: 6 }); await p.mouse.up(); await p.waitForTimeout(200) }
+  const moved = (await spots())[0]
+  await layer().locator('.fel').first().click(); await p.waitForTimeout(200)
+  for (let i = 0; i < 8; i++) { await p.keyboard.press('Space'); await p.waitForTimeout(300) }
+  const s1 = await spots()
+  ok('[3번] 옮겨 둔 상자에서 Space ×8 — 그 상자는 **제자리**', s1.length === 9 && s1[0].x === moved.x && s1[0].y === moved.y, `${moved.x},${moved.y} → ${s1[0].x},${s1[0].y} (상자 ${s1.length})`)
+  ok('[2번] 흐린(echo) 상자가 안 생긴다', !s1.some((e) => e.bg === 'rgb(244, 246, 250)'))
+
+  // ── 9번 · 2차 5번: Space = 옆 · Enter = **허브의 바로 아래** ──
+  await newSlide(); await placeBox(120, 240); await deselect()
+  await layer().locator('.fel').first().click(); await p.waitForTimeout(150)
+  await p.keyboard.press('Space'); await p.waitForTimeout(300)
+  const two = await spots()
+  ok('[9번] Space = **옆**(오른쪽 · 같은 높이)에', two.length === 2 && two[1].x > two[0].x + two[0].w && two[1].y === two[0].y, JSON.stringify(two.map((e) => [e.x, e.y])))
+  await p.keyboard.press('Enter'); await p.waitForTimeout(300)
+  const three = await spots()
+  ok('[9번 · 3차] 이어서 Enter = **형제** — 같은 열에 고른 상자 아래, 둘이 부모 가운데에 맞춰(203 · 277)', three.length === 3 && three[2].x === three[1].x && three[2].y > three[1].y && (three[1].y + three[2].y + three[2].h) / 2 === three[0].y + three[0].h / 2, JSON.stringify(three.map((e) => [e.x, e.y])))
+  ok('[2차 6번] 부모는 안 움직였다', three[0].x === two[0].x && three[0].y === two[0].y)
+  // ── 5 · 8번: 한 상자에서 Space 일곱 — 오른쪽 열에 쌓이고, 선은 모두 뿌리의 오른쪽 가운데에서 · 한 벌 ──
+  await newSlide(); await placeBox(120, 300); await deselect()
+  await layer().locator('.fel').first().click(); await p.waitForTimeout(150)
+  await p.keyboard.press('Space'); await p.waitForTimeout(300)
+  for (let i = 0; i < 6; i++) { await p.keyboard.press('Enter'); await p.waitForTimeout(300) }      // 형제 여섯 = 같은 부모의 자식 일곱
+  await p.keyboard.press('Escape'); await p.waitForTimeout(150)
+  { const v = await spots(); const root = v[0]; const st = await starts()
+    ok('[5번] 자식 일곱 — **모든 선이 뿌리의 오른쪽 가운데**에서 나간다', st.length === 7 && st.every((s) => s[0] === root.x + root.w && s[1] === root.y + root.h / 2), JSON.stringify(st))
+    ok('[3차] 일곱이 오른쪽 열에 **부모 가운데**로 맞춰 선다(가운데 자식이 부모와 같은 높이 · 18 간격) · 부모는 제자리', v.length === 8 && v.slice(1).every((e) => e.x === v[1].x) && v.slice(2).every((e, i) => e.y === v[i + 1].y + 56 + 18) && v[4].y + v[4].h / 2 === root.y + root.h / 2 && root.x === 60 && root.y === 272, JSON.stringify(v.map((e) => [e.x, e.y]))) }
+  ok('[8번] Space 로 그은 선은 #8b93a5 · 2', JSON.stringify(await strokes()) === JSON.stringify(['#8b93a5/2']), JSON.stringify(await strokes()))
+  if (SHOT_DIR) await p.locator('.ax-stage-wrap').screenshot({ path: SHOT_DIR + '/s14/fan7.png' })
+
+  // ── 1번: 편집 중 Esc = 편집만 끝내고 고른 채 · 더블클릭으로 다시 · 고른 상자에 ＋점 넷(변 밖) · 떠 있는 막대 없음(2차 3번) ──
+  await deselect(); await layer().locator('.fel').first().dblclick(); await p.waitForTimeout(250)
+  const ed1 = await editing()
+  await p.keyboard.press('Escape'); await p.waitForTimeout(200)
+  ok('[1번] 편집 중 Esc → 편집은 끝나고 **상자는 고른 채**', ed1 && !(await editing()) && (await selCount()) === 1, `editing ${ed1}→${await editing()} · sel ${await selCount()}`)
+  { const rb = await p.locator('.stage .fel.sel').first().boundingBox(); const dots = await dotsAt(); const { z } = await geo()
+    const outside = dots.every(([x, y]) => x < rb.x - 8 * z || x > rb.x + rb.width + 8 * z || y < rb.y - 8 * z || y > rb.y + rb.height + 8 * z)
+    ok('[1번] 고른 상자에 ＋점 넷이 **변 밖**에 뜬다(호버 없이)', dots.length === 4 && outside, JSON.stringify({ rb: [rb.x, rb.y, rb.width, rb.height].map(Math.round), dots: dots.map((d) => d.map(Math.round)) }))
+    ok('[2차 3번] 고른 상자 위에 떠 있는 서식 막대가 **없다**(윗줄 상자를 가리지 않는다) · 동작은 도구줄에', (await p.locator('.stage .ctxbar').count()) === 0 && (await p.locator('.ax-tbrow.ctx .ib[title="복제"]').count()) === 1) }
+  await p.keyboard.press('Escape'); await p.waitForTimeout(150)
+  ok('[1번] 한 번 더 Esc → 선택 해제', (await selCount()) === 0)
+  await layer().locator('.fel').first().dblclick(); await p.waitForTimeout(250)
+  ok('[1번] 더블클릭으로 다시 글을 고친다', await editing())
+  await p.keyboard.press('Escape'); await p.waitForTimeout(150)
+  // 오른쪽 ＋점을 **누르기만** = Space 와 같은 자식(같은 벌의 선 · 글칸 열림)
+  { const n0 = (await spots()).length, l0 = await lines().count()
+    const right = (await dotsAt()).sort((a, b) => b[0] - a[0])[0]
+    await p.mouse.click(right[0], right[1]); await p.waitForTimeout(400)
+    ok('[1 · 8번] 고른 상자의 오른쪽 ＋점을 누르면 **자식 하나**가 붙고 글칸이 열린다', (await spots()).length === n0 + 1 && (await lines().count()) === l0 + 1 && (await editing()), `상자 ${n0}→${(await spots()).length} · 선 ${l0}→${await lines().count()}`)
+    ok('[8번] ＋점으로 그은 선도 같은 벌(#8b93a5 · 2)', JSON.stringify(await strokes()) === JSON.stringify(['#8b93a5/2']), JSON.stringify(await strokes()))
+    await p.keyboard.press('Escape'); await p.waitForTimeout(150)
+    const r2 = (await spots())[0]
+    ok('[5번] ＋점으로 붙인 뒤에도 모든 선이 뿌리의 오른쪽 가운데에서', (await starts()).every((s) => s[0] === r2.x + r2.w && s[1] === r2.y + r2.h / 2), JSON.stringify(await starts())) }
+  if (SHOT_DIR) await p.locator('.ax-stage-wrap').screenshot({ path: SHOT_DIR + '/s14/esc_dots.png' })
+
+  // ── 4번: 끌어 고르기 — 종이 안에서도, 종이 밖(작업면)에서도 ──
+  await newSlide(); await placeBox(200, 200); await deselect(); await placeBox(400, 200); await deselect()
+  { const { lb, z } = await geo()
+    await p.mouse.move(lb.x + 120 * z, lb.y + 120 * z); await p.mouse.down(); await p.mouse.move(lb.x + 560 * z, lb.y + 320 * z, { steps: 6 }); await p.mouse.up(); await p.waitForTimeout(200)
+    ok('[4번] 종이 안 빈 곳에서 끌어 둘을 고른다', (await selCount()) === 2, String(await selCount()))
+    await deselect()
+    const st2 = await p.locator('.stage').first().boundingBox()
+    ok('[4번] (준비) 종이 위에 작업면 여백이 있다', lb.y - st2.y > 12, `종이 y ${Math.round(lb.y)} · 작업면 y ${Math.round(st2.y)}`)
+    await p.mouse.move(lb.x + 120 * z, lb.y - 6); await p.mouse.down(); await p.mouse.move(lb.x + 560 * z, lb.y + 320 * z, { steps: 6 }); await p.mouse.up(); await p.waitForTimeout(200)
+    ok('[4번] **종이 밖(작업면)에서** 끌어도 둘을 고른다', (await selCount()) === 2, String(await selCount()))
+    await deselect() }
+
+  // ── 7번: 연결 모드 — Esc · 빈 곳 클릭으로 취소 ──
+  await layer().locator('.fel').first().click(); await p.waitForTimeout(200)
+  await p.locator('.ax-tbrow.ctx .ib[title="이 도형에서 연결(화살표)"]').click(); await p.waitForTimeout(200)   // 2차 3번: 도구줄로 옮겼다
+  const hint1 = await layer().locator('.conn-hint').innerText().catch(() => '')
+  await p.keyboard.press('Escape'); await p.waitForTimeout(200)
+  ok('[7번] 「→」 뒤 Esc 로 연결 모드가 풀린다(힌트에 Esc 안내)', /Esc 취소/.test(hint1) && (await layer().locator('.conn-hint').count()) === 0, hint1)
+  await layer().locator('.fel').first().click(); await p.waitForTimeout(200)
+  await p.locator('.ax-tbrow.ctx .ib[title="이 도형에서 연결(화살표)"]').click(); await p.waitForTimeout(200)   // 2차 3번: 도구줄로 옮겼다
+  { const { lb, z } = await geo(); await p.mouse.click(lb.x + 600 * z, lb.y + 420 * z); await p.waitForTimeout(200) }
+  ok('[7번] 연결 모드에서 빈 곳을 눌러도 모드가 풀린다', (await layer().locator('.conn-hint').count()) === 0)
+  await deselect()
+
+  // ── 10번: ＋점으로 이은 둘 — 접기 손잡이 · 접어도 자리 그대로 ──
+  await newSlide(); await placeBox(200, 240); await deselect()
+  await layer().locator('.fel').first().hover(); await p.waitForTimeout(200)
+  { const dot = (await dotsAt()).sort((a, b) => b[0] - a[0])[0]; const { lb, z } = await geo()
+    await p.mouse.move(dot[0], dot[1]); await p.mouse.down(); await p.mouse.move(lb.x + 450 * z, lb.y + 268 * z, { steps: 6 }); await p.mouse.up(); await p.waitForTimeout(300) }
+  await p.keyboard.press('Escape'); await deselect()
+  const pair = await spots()
+  ok('[10번] (준비) ＋점으로 끌어 상자 둘이 선으로 이어졌다', pair.length === 2 && (await lines().count()) === 1)
+  ok('[10번] ＋점으로 끌어 만든 상자도 고른 상자를 닮는다(크기)', pair.length === 2 && pair[1].w === pair[0].w && pair[1].h === pair[0].h, JSON.stringify(pair.map((e) => [e.w, e.h])))
+  const folds = layer().locator('.tree-fold')
+  ok('[10번] 손으로 이은 그림에도 **접기 손잡이**가 뜬다(부모에만)', (await folds.count()) === 1, String(await folds.count()))
+  await folds.first().click(); await p.waitForTimeout(250)
+  const folded = await spots()
+  ok('[10번] 접으면 자식이 숨고 **부모는 제자리** · 「+1」', folded.length === 1 && folded[0].x === pair[0].x && folded[0].y === pair[0].y && (await layer().locator('.tree-plusn').innerText()) === '+1', JSON.stringify(folded))
+  await folds.first().click(); await p.waitForTimeout(250)
+  const back = await spots()
+  ok('[10번] 펴면 **자리 그대로** 돌아온다(손으로 놓은 자리가 그림이다)', back.length === 2 && back[1].x === pair[1].x && back[1].y === pair[1].y, JSON.stringify([pair[1], back[1]].map((e) => [e.x, e.y])))
+  if (SHOT_DIR) await p.locator('.ax-stage-wrap').screenshot({ path: SHOT_DIR + '/s14/fold_hand.png' })
+
+  // ── 어디서든 끌어 고르기(2026-10-07 추가 요청 · marquee_any.test.mjs): 「도형이나 선을 선택하지 않은 이상 어디서든 드래그가 되도록」 ──
+  // (가) 고르지 않은 선 위에서 시작해도 끌어 고르기(선은 안 휜다) · 누르기만 하면 그 선이 골라진다
+  await newSlide(); await placeBox(160, 240); await deselect()
+  await layer().locator('.fel').first().click(); await p.waitForTimeout(150)
+  await p.keyboard.press('Space'); await p.waitForTimeout(300); await p.keyboard.press('Escape'); await p.waitForTimeout(100)
+  await p.keyboard.press('Enter'); await p.waitForTimeout(300); await p.keyboard.press('Escape'); await deselect()
+  { const d0 = await lines().nth(1).getAttribute('d')
+    const pts = d0.match(/-?[\d.]+ -?[\d.]+/g).map((t) => t.split(' ').map(Number))          // 둘째 선(뿌리 → 둘째 자식)의 세로 토막 한가운데
+    const { lb, z } = await geo()
+    const sx = lb.x + ((pts[1][0] + pts[2][0]) / 2) * z, sy = lb.y + ((pts[1][1] + pts[2][1]) / 2) * z
+    const on = await p.evaluate(([x, y]) => { const n = document.elementFromPoint(x, y); return n ? n.tagName : '' }, [sx, sy])
+    ok('[어디서든] (준비) 누른 자리가 선의 누름 영역이다', /^path$/i.test(on), on)
+    await p.mouse.move(sx, sy); await p.mouse.down(); await p.mouse.move(lb.x + 630 * z, lb.y + 440 * z, { steps: 6 }); await p.mouse.up(); await p.waitForTimeout(200)
+    ok('[어디서든] 고르지 않은 **선 위에서 끌어도** 끌어 고르기다 — 상자가 골라지고 선은 안 휜다', (await selCount()) >= 1 && (await lines().nth(1).getAttribute('d')) === d0, `sel ${await selCount()}`)
+    await deselect()
+    await p.mouse.click(sx, sy); await p.waitForTimeout(200)
+    ok('[어디서든] 선을 **누르기만** 하면 그 선이 골라진다', (await layer().locator('svg.freeconn path[stroke="#2462EB"]').count()) === 1 && (await selCount()) === 0)
+    await deselect() }
+  // (나) 납작하게(가로로만) 끌어도 지나간 상자를 고른다
+  { const { lb, z } = await geo()
+    await p.mouse.move(lb.x + 40 * z, lb.y + 240 * z); await p.mouse.down(); await p.mouse.move(lb.x + 630 * z, lb.y + 240 * z, { steps: 6 }); await p.mouse.up(); await p.waitForTimeout(200)
+    ok('[어디서든] 납작하게(가로로만) 끌어도 지나간 상자를 고른다', (await selCount()) >= 1, String(await selCount()))
+    await deselect() }
+  // (다) 카드 쪽(표지)에서도 — 층이 passthru 라 전에는 빈 곳 끌기가 아예 안 됐다
+  await p.locator('.cardpick .add').click(); await p.waitForTimeout(250)
+  await p.locator('.cpk-pop .cpk-tile', { hasText: '표지' }).first().click(); await p.waitForTimeout(600)
+  await deselect()
+  await placeBox(200, 300); await deselect(); await placeBox(400, 300); await deselect()
+  { const { lb, z } = await geo()
+    // 카드 글자 칸 · 단추가 아닌 빈 자리에서 시작한다 — 네 귀퉁이 중 비어 있는 곳
+    let start = null
+    for (const [cx, cy] of [[20, 20], [620, 20], [20, 460], [620, 460]]) {
+      const taken = await p.evaluate(([x, y]) => { const n = document.elementFromPoint(x, y); return n ? !!n.closest('.cardedit, button, a, input, textarea, select, [contenteditable="true"], .fel') : true }, [lb.x + cx * z, lb.y + cy * z])
+      if (!taken) { start = [cx, cy]; break }
+    }
+    ok('[어디서든] (준비) 표지에 빈 귀퉁이가 있다', !!start, JSON.stringify(start))
+    if (start) {
+      await p.mouse.move(lb.x + start[0] * z, lb.y + start[1] * z); await p.mouse.down()
+      await p.mouse.move(lb.x + 320 * z, lb.y + 300 * z, { steps: 6 }); await p.mouse.up(); await p.waitForTimeout(200)
+      // 귀퉁이 → 가운데(320,300) 사각형은 어느 귀퉁이에서 시작하든 두 상자(140..260 · 340..460 × 272..328) 중 하나와 닿는다
+      ok('[어디서든] **카드 쪽**(표지) 빈 곳에서 끌어도 상자가 골라진다', (await selCount()) >= 1, `시작 ${start} · sel ${await selCount()}`)
+    }
+    await deselect() }
+
+  // ── 2차 5·6번: 허브로 돌아오기 · 재정렬 없음 / 2차 4번: 머메이드 보기 / 2차 2번: 모양 바꾸기 ──
+  await newSlide(); await placeBox(160, 200); await deselect()
+  await layer().locator('.fel').first().click(); await p.waitForTimeout(150)
+  await p.keyboard.press('Space'); await p.waitForTimeout(300); await p.keyboard.type('A'); await p.keyboard.press('Enter'); await p.waitForTimeout(250)
+  ok('[3차] 글을 끝내면 **그 상자가 고른 채**(알마인드 — 이어서 Enter 면 형제)', (await p.locator('.stage .fel.sel').first().innerText().catch(() => '')).trim() === 'A')
+  await p.keyboard.press('Enter'); await p.waitForTimeout(300); await p.keyboard.type('B'); await p.keyboard.press('Enter'); await p.waitForTimeout(250)
+  { const v = await spots(); const root = v[0], A = v.find((x) => x.t === 'A'), B = v.find((x) => x.t === 'B')
+    ok('[3차] Space = 자식(오른쪽) · Enter = **형제**(같은 열 · A 바로 아래) · 둘이 부모 가운데에', !!A && !!B && A.x > root.x + root.w && B.x === A.x && B.y > A.y && (A.y + B.y + B.h) / 2 === root.y + root.h / 2, JSON.stringify(v.map((x) => [x.t, x.x, x.y]))) }
+  { const { lb, z } = await geo(); const A = (await spots()).find((x) => x.t === 'A')
+    await p.mouse.move(lb.x + (A.x + A.w / 2) * z, lb.y + (A.y + A.h / 2) * z); await p.mouse.down(); await p.mouse.move(lb.x + (A.x + A.w / 2 + 200) * z, lb.y + (A.y + A.h / 2 - 120) * z, { steps: 6 }); await p.mouse.up(); await p.waitForTimeout(200)
+    const moved = await spots()
+    ok('[2차 6번] (준비) 자식 하나(A)를 손으로 옮겼다', moved.find((x) => x.t === 'A').x !== A.x)
+    await deselect(); await layer().locator('.fel').first().click(); await p.waitForTimeout(150)
+    await p.keyboard.press('Space'); await p.waitForTimeout(300); await p.keyboard.press('Escape'); await p.waitForTimeout(150)
+    const after = await spots()
+    const mA = moved.find((x) => x.t === 'A'), aA = after.find((x) => x.t === 'A'), aB = after.find((x) => x.t === 'B'), aN = after[after.length - 1]
+    ok('[2차 6번 · 3차] 옮긴 상자(A)와 부모는 그대로 · 열에 남은 B 와 새 자식만 부모 가운데에 맞춰 선다', after.length === moved.length + 1 && aA.x === mA.x && aA.y === mA.y && after[0].x === moved[0].x && after[0].y === moved[0].y && aN.x === aB.x && (aB.y + aN.y + aN.h) / 2 === after[0].y + after[0].h / 2, JSON.stringify(after.map((x) => [x.t, x.x, x.y]))) }
+  // 머메이드 보기 — 그린 것에서 글을 뽑는다
+  await panel6().locator('.insp-pill', { hasText: '머메이드 보기' }).first().click(); await p.waitForTimeout(300)
+  { const src = await p.locator('.ui-modal textarea.mm-src').inputValue().catch(() => '')
+    ok('[2차 4번] 「머메이드 보기」 — 지금 그림의 머메이드 글(graph LR · 화살표 셋 · 글자 그대로)', /^graph LR/.test(src) && (src.match(/-->/g) || []).length === 3 && /\[A\]/.test(src) && /\[B\]/.test(src), src.replace(/\n/g, ' | '))
+    await p.keyboard.press('Escape'); await p.waitForTimeout(200)
+    ok('[2차 4번] Esc 로 닫힌다', (await p.locator('.ui-scrim').count()) === 0) }
+  // 모양 바꾸기 — 오른쪽 패널 「모양」
+  await layer().locator('.fel').first().click(); await p.waitForTimeout(200)
+  await panel6().locator('.insp-shapes .shp-cell[title="마름모"]').click(); await p.waitForTimeout(250)
+  ok('[2차 2번] 패널 「모양」 에서 **도형 모양을 바꾼다**(네모 → 마름모 · 자리 그대로)', (await layer().locator('.fel.diamond').count()) === 1 && (await spots())[0].x === 100 && (await spots())[0].y === 172, JSON.stringify((await spots())[0]))
+  if (SHOT_DIR) await p.locator('.ax-stage-wrap').screenshot({ path: SHOT_DIR + '/s14/hub_mermaid.png' })
+
+  // ── (질문) 좌우 「안 보이는 경계선」 — 패널 폭 조절 띠(.ax-resize · 7px · z-index 5)가 작업면 양 끝을 덮어, 종이가 끝에 닿아 있으면 그 7px 에서는
+  //    도형 놓기 · 고르기 · 끌기가 캔버스에 안 닿았다. 이제 띠는 종이 아래(z 1 < 2)로 — 끝까지 눌린다. 회색 여백에서는 여전히 잡힌다.
+  await newSlide()
+  { const { lb } = await geo(); const n0 = await layer().locator('.fel').count()
+    await p.keyboard.press('r'); await p.mouse.click(lb.x + 3, lb.y + lb.height * 0.3); await p.waitForTimeout(250); await deselect()
+    await p.keyboard.press('r'); await p.mouse.click(lb.x + lb.width - 3, lb.y + lb.height * 0.3); await p.waitForTimeout(250); await deselect()
+    const st = await p.locator('.stage').first().boundingBox()
+    ok('[경계] 종이가 작업면 양 끝에 닿아 있을 때 **끝 3px 안쪽을 찍어도** 도형이 놓인다(폭 조절 띠가 안 가로챈다)', (await layer().locator('.fel').count()) === n0 + 2,
+      `종이 x ${Math.round(lb.x)}~${Math.round(lb.x + lb.width)} · 작업면 x ${Math.round(st.x)}~${Math.round(st.x + st.width)} · 상자 ${n0}→${await layer().locator('.fel').count()}`)
+    const strip = await p.locator('.ax-resize.l').boundingBox()
+    ok('[경계] 폭 조절 띠는 그 자리에 있다(종이 아래로 들어갔을 뿐)', !!strip && strip.width >= 6, strip ? JSON.stringify([Math.round(strip.x), Math.round(strip.width)]) : '없음') }
 }])
 
 // ONLY=5단계 처럼 주면 그 이름이 든 단계만 돈다(고치는 동안 빨리 돌리려고). 비우면 전부.

@@ -31,6 +31,13 @@ export default function PageWithCanvas({ page, docTitle, orientation, size, font
     const t = e.target as HTMLElement | null
     if (t && t.closest('.fel, .cardedit, .conn-hint')) return
     setSel(null)
+    // **카드 쪽에서도 빈 곳에서 끌면 고르기**(2026-10-07 · 사용자: 「도형이나 선을 선택하지 않은 이상 어디서든 드래그」).
+    // 카드 쪽은 도형 층이 passthru(pointer-events:none)라 층이 pointerdown 을 못 받는다 — 여기서 받아 층에 넘긴다(ebook:marquee → FreeLayer.beginMarquee).
+    // 자유 쪽은 층이 직접 받으므로(target 이 .freelayer 안) 건너뛴다. 단추 · 입력칸 · 글칸은 제 일이 있다(카드 글자 칸은 위에서 이미 걸렀다).
+    if (e.button !== 0 || !t || t.closest('.freelayer') || t.closest('button, a, input, textarea, select, [contenteditable="true"]')) return
+    if (useCanvasUI.getState().tool !== 'select') return
+    e.preventDefault()
+    window.dispatchEvent(new CustomEvent('ebook:marquee', { detail: { x: e.clientX, y: e.clientY } }))
   }
   // 편집 아님: 접힌 가지도 펴서 내보내므로(FreeLayer) 숨은 상자까지 센다.
   const k = interactive ? Math.max(1, grow || 1) : growOf(page.els, page.strokes, W, H, true)

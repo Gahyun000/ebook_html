@@ -52,6 +52,12 @@ export const FCOLORS = ['#eaf0ff', '#dceeb1', '#f4d2c1', '#e7e3fb', '#cdeacf', '
  */
 export const NO_FILL = ['text', 'icon', 'wordart', 'image', 'note', 'table']
 
+/**
+ * **연결점(＋점)을 안 띄우는 갈래**(EVER-SKETCH1 824ec0e · 2026-10-07 여기로). 표에 점이 붙으면 칸을 잡으려다 선이 그어진다 —
+ * 표끼리 이을 일은 드물고, 정말 필요하면 「→ 연결」로 이을 수 있다. 캔버스(FreeLayer) · 도구줄(동작 묶음) · 머메이드 뽑기(mermaidOut)가 같은 목록을 본다.
+ */
+export const NO_CPT = ['text', 'icon', 'wordart', 'note', 'table']
+
 // 되돌리기 스택은 canvas/history.ts 로 옮겼다(store.ts 와의 순환 참조를 피하기 위해).
 // 기존 import 경로를 유지하기 위해 여기서 다시 내보낸다.
 export {
