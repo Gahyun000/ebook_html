@@ -1847,6 +1847,23 @@ STAGES.push(['14단계 · 도형 UX(불편점 1~10)', async () => {
   if (SHOT_DIR) await p.locator('.ax-stage-wrap').screenshot({ path: SHOT_DIR + '/s14/esc_dots.png' })
 
   // ── 4번: 끌어 고르기 — 종이 안에서도, 종이 밖(작업면)에서도 ──
+  // ── 4차(사용자: 「child1 계층에서 A,B,C,D,E 를 만들었고 B 에서 child2, C 에서 child2 계층을 만든 경우 얘네 둘이 겹쳐보이는 때가 있음 …
+  //    처음 만들때부터 겹치지 않도록 — B,C 사이 간격을 늘인다거나」). 자식 다섯 → B 에 자식 둘 → C 에 자식 둘(store.tidyUp · tree_keys.test.mjs 6).
+  await newSlide(); await placeBox(120, 300); await deselect()
+  await layer().locator('.fel').first().click(); await p.waitForTimeout(150)
+  await p.keyboard.press('Space'); await p.waitForTimeout(300)
+  for (let i = 0; i < 4; i++) { await p.keyboard.press('Enter'); await p.waitForTimeout(300) }
+  await p.keyboard.press('Escape'); await p.waitForTimeout(150); await deselect()
+  const clickAt = async (e) => { const { lb, z } = await geo(); await p.mouse.click(lb.x + (e.x + e.w / 2) * z, lb.y + (e.y + e.h / 2) * z); await p.waitForTimeout(200) }
+  const twoKids = async () => { await p.keyboard.press('Space'); await p.waitForTimeout(300); await p.keyboard.press('Enter'); await p.waitForTimeout(300); await p.keyboard.press('Escape'); await p.waitForTimeout(150); await deselect() }
+  { const v = await spots(); await clickAt(v[2]); await twoKids() }                 // B(둘째 자식)에 자식 둘
+  { const v = await spots(); await clickAt(v[3]); await twoKids() }                 // C(셋째 자식)에 자식 둘 — 사용자가 본 그 자리
+  { const v = await spots(); const root = v[0], [A, B, C, D, E, b1, b2, c1, c2] = v.slice(1)
+    const ov = (() => { let n = 0; for (let i = 0; i < v.length; i++) for (let j = i + 1; j < v.length; j++) { const a = v[i], b = v[j]; if (a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h) n++ } return n })()
+    ok('[4차] B · C 의 자식(손자) 넷 — **겹침 없음** · 뿌리는 제자리', v.length === 10 && ov === 0 && root.x === 60 && root.y === 272, JSON.stringify(v.map((e) => [e.x, e.y])))
+    ok('[4차] B 의 자식 둘은 B 가운데에 · C 의 자식 둘은 C 가운데에 · 두 손자 열 사이는 꼭 한 칸(18)', v.length === 10 && b1.x === c1.x && (b1.y + b2.y + b2.h) / 2 === B.y + B.h / 2 && (c1.y + c2.y + c2.h) / 2 === C.y + C.h / 2 && c1.y - (b2.y + b2.h) === 18, JSON.stringify(v.length === 10 ? [B.y, b1.y, b2.y, C.y, c1.y, c2.y] : v.length))
+    ok('[4차] A~E 는 같은 열에 · **B · C 사이가 자손 범위만큼(130 + 18) 벌어지고** · 다섯은 여전히 뿌리 가운데에', v.length === 10 && [A, B, C, D, E].every((e) => e.x === A.x) && C.y - B.y === 148 && (A.y + E.y + E.h) / 2 === root.y + root.h / 2, JSON.stringify(v.length === 10 ? [A.y, B.y, C.y, D.y, E.y] : v.length))
+    if (SHOT_DIR) { await p.locator('.ax-stage-wrap').screenshot({ path: SHOT_DIR + '/s14/grandkids_spread.png' }) } }
   await newSlide(); await placeBox(200, 200); await deselect(); await placeBox(400, 200); await deselect()
   { const { lb, z } = await geo()
     await p.mouse.move(lb.x + 120 * z, lb.y + 120 * z); await p.mouse.down(); await p.mouse.move(lb.x + 560 * z, lb.y + 320 * z, { steps: 6 }); await p.mouse.up(); await p.waitForTimeout(200)
@@ -1954,6 +1971,22 @@ STAGES.push(['14단계 · 도형 UX(불편점 1~10)', async () => {
   await panel6().locator('.insp-pill', { hasText: '머메이드 보기' }).first().click(); await p.waitForTimeout(300)
   { const src = await p.locator('.ui-modal textarea.mm-src').inputValue().catch(() => '')
     ok('[2차 4번] 「머메이드 보기」 — 지금 그림의 머메이드 글(graph LR · 화살표 셋 · 글자 그대로)', /^graph LR/.test(src) && (src.match(/-->/g) || []).length === 3 && /\[A\]/.test(src) && /\[B\]/.test(src), src.replace(/\n/g, ' | '))
+    // 추가 요청 1(2026-10-07 · 「여기에서도 소스를 변경을 통해서 수정할 수 있도록」) — 글을 고쳐 「적용」 하면 그림이 따라온다(store.applyMermaid · mermaid_apply.test.mjs)
+    const n0 = (await spots()).length, l0 = await lines().count()
+    ok('[추가 1] 「적용」 단추는 고친 데가 없으면 꺼져 있다', await p.locator('.ui-modal .insp-pill', { hasText: '적용' }).isDisabled())
+    await p.locator('.ui-modal textarea.mm-src').fill(src + '\n  n1 --> n9[적용]')
+    await p.locator('.ui-modal .insp-pill', { hasText: '적용' }).click(); await p.waitForTimeout(400)
+    const src2 = await p.locator('.ui-modal textarea.mm-src').inputValue().catch(() => '')
+    ok('[추가 1] `n1 --> n9[적용]` 을 보태 적용 → 상자 하나 · 선 하나가 늘고 글은 「적용」 · 뿌리 옆에', (await spots()).length === n0 + 1 && (await lines().count()) === l0 + 1 && (await layer().locator('.fel', { hasText: '적용' }).count()) === 1 && (await spots()).at(-1).x === (await spots())[0].x + (await spots())[0].w + 60, `${n0}→${(await spots()).length} · 선 ${l0}→${await lines().count()}`)
+    ok('[추가 1] 창의 글이 지금 그림으로 다시 뽑힌다(화살표 넷 · 「적용」 포함) · 안내', /\[적용\]/.test(src2) && (src2.match(/-->/g) || []).length === 4 && /적용했어요 — 상자 \+1/.test(await p.locator('.ui-modal .mm-note').innerText()), src2.replace(/\n/g, ' | '))
+    await p.locator('.ui-modal textarea.mm-src').fill(src2.replace('[적용]', '(적용2)'))
+    await p.locator('.ui-modal .insp-pill', { hasText: '적용' }).click(); await p.waitForTimeout(400)
+    const src3 = await p.locator('.ui-modal textarea.mm-src').inputValue().catch(() => '')
+    ok('[추가 1] 글 · 모양을 고쳐 적용 → 그 상자만 「적용2」 둥근 상자(상자 수 그대로)', (await spots()).length === n0 + 1 && (await layer().locator('.fel', { hasText: '적용2' }).count()) === 1 && /\(적용2\)/.test(src3), src3.replace(/\n/g, ' | '))
+    await p.locator('.ui-modal textarea.mm-src').fill('graph LR\n  n1 --> ')
+    await p.locator('.ui-modal .insp-pill', { hasText: '적용' }).click(); await p.waitForTimeout(300)
+    ok('[추가 1] 못 읽는 줄이 있으면 적용하지 않고 몇째 줄인지 말한다', (await spots()).length === n0 + 1 && /2째 줄을 못 읽었어요/.test(await p.locator('.ui-modal .mm-note').innerText().catch(() => '')), await p.locator('.ui-modal .mm-note').innerText().catch(() => ''))
+    if (SHOT_DIR) await p.locator('.ui-modal').screenshot({ path: SHOT_DIR + '/s14/mermaid_apply.png' })
     await p.keyboard.press('Escape'); await p.waitForTimeout(200)
     ok('[2차 4번] Esc 로 닫힌다', (await p.locator('.ui-scrim').count()) === 0) }
   // 모양 바꾸기 — 오른쪽 패널 「모양」
@@ -1972,7 +2005,13 @@ STAGES.push(['14단계 · 도형 UX(불편점 1~10)', async () => {
     ok('[경계] 종이가 작업면 양 끝에 닿아 있을 때 **끝 3px 안쪽을 찍어도** 도형이 놓인다(폭 조절 띠가 안 가로챈다)', (await layer().locator('.fel').count()) === n0 + 2,
       `종이 x ${Math.round(lb.x)}~${Math.round(lb.x + lb.width)} · 작업면 x ${Math.round(st.x)}~${Math.round(st.x + st.width)} · 상자 ${n0}→${await layer().locator('.fel').count()}`)
     const strip = await p.locator('.ax-resize.l').boundingBox()
-    ok('[경계] 폭 조절 띠는 그 자리에 있다(종이 아래로 들어갔을 뿐)', !!strip && strip.width >= 6, strip ? JSON.stringify([Math.round(strip.x), Math.round(strip.width)]) : '없음') }
+    ok('[경계] 폭 조절 띠는 그 자리에 있다(종이 아래로 들어갔을 뿐)', !!strip && strip.width >= 6, strip ? JSON.stringify([Math.round(strip.x), Math.round(strip.width)]) : '없음')
+    // 종이 끝은 작업면과 같은 색이라 안 보인다 — 놓는 도구를 든 동안만 점선으로 보이고, 내려놓으면 사라진다(평소 테두리 없음은 13단계).
+    const outline = () => p.locator('.stage .pv-paper').evaluate((n) => getComputedStyle(n).outlineStyle)
+    await p.keyboard.press('r'); await p.waitForTimeout(150)
+    const armed = await outline()
+    await p.keyboard.press('Escape'); await p.waitForTimeout(150)
+    ok('[경계] 도형을 들면 **종이 가장자리가 점선**으로 보이고, Esc 로 내려놓으면 사라진다', armed === 'dashed' && (await outline()) === 'none', `${armed} → ${await outline()}`) }
 }])
 
 // ONLY=5단계 처럼 주면 그 이름이 든 단계만 돈다(고치는 동안 빨리 돌리려고). 비우면 전부.

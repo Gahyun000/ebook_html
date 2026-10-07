@@ -148,6 +148,9 @@ export default function Preview() {
   // 브라우저가 알아서 굴렸다(그래서 종이가 밀렸다). 이제는 여기서만, 이 창만 굴린다.
   const revealId = useCanvasUI((s) => s.revealId)
   const setReveal = useCanvasUI((s) => s.setReveal)
+  // 놓는 도구(도형 · 글상자 · 표 …)를 들고 있는가 — 고르기 · 연결선 · 펜 · 형광펜 · 지우개는 종이 밖에서도 뜻이 있어 빼고, 나머지는 종이 안에서만 놓인다.
+  const tool = useCanvasUI((s) => s.tool)
+  const placing = tool !== 'select' && tool !== 'connect' && tool !== 'pen' && tool !== 'highlighter' && tool !== 'eraser'
   useLayoutEffect(() => {
     if (revealId == null) return
     const node = stageRef.current
@@ -174,7 +177,9 @@ export default function Preview() {
         ? (
           // 가운데 두기는 workArea.layout 이 맡는다 — 종이가 작업창보다 커지면 왼쪽 위 여백부터 구른다.
           <div className="pv-ext" style={{ width: lay.extW, height: lay.extH }}>
-            <div className="pv-paper" style={{ left: lay.offX, top: lay.offY, width: W * k * scale, height: H * k * scale }}>
+            {/* **놓는 중에는 종이의 가장자리를 점선으로 보인다**(2026-10-07 · 사용자: 「좌우로 안 보이는 경계선이 있는 것 같은데」). 작업면은 종이와 같은 색이고
+                테두리가 없어(「창 전체가 슬라이드다」) 종이 밖 여백을 눌러도 아무 일이 없는 까닭을 알 수 없었다. 도구를 내려놓으면 사라진다. */}
+            <div className={'pv-paper' + (placing ? ' placing' : '')} style={{ left: lay.offX, top: lay.offY, width: W * k * scale, height: H * k * scale }}>
               <div style={{ width: W * k, height: H * k, transform: `scale(${scale})`, transformOrigin: 'top left' }}>
                 <PageWithCanvas page={page} docTitle={title} orientation={orientation} size={size} font={font} tocItems={items} interactive={true} grow={k} />
               </div>

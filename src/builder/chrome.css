@@ -187,6 +187,8 @@
 .ax-stage-wrap .stage{flex:1 1 auto;min-height:0;display:block;padding:0;background:#fff;border-radius:0}
 .ax-stage-wrap .stage .pv-ext{position:relative}
 .ax-stage-wrap .stage .pv-paper{position:absolute;z-index:2}
+/* 놓는 도구를 든 동안만 종이 가장자리 점선(2026-10-07 · 「안 보이는 경계선」). 평소에는 테두리 없음(스모크 13단계). */
+.ax-stage-wrap .stage .pv-paper.placing{outline:2px dashed rgba(36,98,235,.55);outline-offset:-1px}
 .ax-stage-wrap .stage .pv-empty{height:100%;display:flex;align-items:center;justify-content:center}
 .pv-out{color:#b4541a}
 .ax-panelcol{display:grid;grid-template-columns:1fr 52px;background:var(--ax-surface);border-left:1px solid var(--ax-line);min-height:0}

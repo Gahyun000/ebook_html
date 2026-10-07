@@ -37,7 +37,11 @@ const fl = bare(readFileSync('./src/canvas/FreeLayer.tsx', 'utf8'))
 }
 // ── ③ 무장 중 안내 띠 ──
 {
-  check(/\{active && adding \? <div className="conn-hint">빈 곳을 눌러 놓을 자리를 정하세요 · Esc 취소<\/div> : null\}/.test(fl), '무장 중에는 「빈 곳을 눌러 … Esc 취소」 띠가 뜬다')
+  check(/\{active && adding \? <div className="conn-hint">점선 안의 빈 곳을 눌러 놓을 자리를 정하세요 · Esc 취소<\/div> : null\}/.test(fl), '무장 중에는 「점선 안의 빈 곳을 눌러 … Esc 취소」 띠가 뜬다')
+  // 「좌우로 안 보이는 경계선」(2026-10-07): 작업면이 종이와 같은 색이라 종이 끝이 안 보였다 — 놓는 동안만 종이 가장자리를 점선으로.
+  const pv = bare(readFileSync('./src/builder/Preview.tsx', 'utf8'))
+  check(/'pv-paper' \+ \(placing \? ' placing' : ''\)/.test(pv) && /tool !== 'select' && tool !== 'connect' && tool !== 'pen'/.test(pv), '놓는 도구를 든 동안 종이에 .placing(점선 가장자리)')
+  check(/\.pv-paper\.placing\{outline:2px dashed/.test(readFileSync('./src/builder/chrome.css', 'utf8')), '점선 가장자리 CSS')
 }
 // ── ④ 1번 — 편집 중 Esc 는 편집만 끝내고 상자는 고른 채 ──
 {

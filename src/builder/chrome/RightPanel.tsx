@@ -18,6 +18,7 @@ import { SHAPES } from './EditToolbar'
 import { polyClip, SHAPE_RADIUS } from '../../canvas/shapePaths'
 import Modal from '../../ui/Modal'
 import { mermaidOfPage } from '../../cards/mermaidOut'
+import { parseMermaid } from '../../cards/mermaid'
 import { pushSnap } from '../../canvas/model'
 import type { FreeEl } from '../../state/store'
 import { addRow, delRow, addCol, delCol, setAlignRange, setVAlignRange, setCellFsRange, setCellBgRange } from '../../canvas/tableOps'
@@ -105,6 +106,21 @@ export default function RightPanel() {
   const expandMindmap = useBuilder((s) => s.expandMindmap)
   const setCanvas = useBuilder((s) => s.setCanvas)
   const [mmOpen, setMmOpen] = useState(false)
+  // 머메이드 창의 글 — 열 때 지금 그림에서 뽑고, 고쳐서 「적용」 하면 그림이 따라온다(2026-10-07 추가 요청 1 · store.applyMermaid).
+  const [mmText, setMmText] = useState('')
+  const [mmNote, setMmNote] = useState<{ err?: string; ok?: string } | null>(null)
+  const openMm = () => { if (!page) return; setMmText(mermaidOfPage(page)); setMmNote(null); setMmOpen(true) }
+  const applyMm = () => {
+    if (!page) return
+    const g = parseMermaid(mmText)
+    if (g.errors.length) { setMmNote({ err: `${g.errors[0].line}째 줄을 못 읽었어요: ${g.errors[0].text.trim()}` }); return }
+    pushSnap(page.id, JSON.stringify({ els: page.els, conns: page.conns, strokes: page.strokes, detached: page.detached }))
+    const r = useBuilder.getState().applyMermaid(page.id, mmText)
+    if (r.errors.length) { setMmNote({ err: `${r.errors[0].line}째 줄을 못 읽었어요: ${r.errors[0].text.trim()}` }); return }
+    const pg = useBuilder.getState().pages.find((x) => x.id === page.id)
+    if (pg) setMmText(mermaidOfPage(pg))
+    setMmNote({ ok: `적용했어요 — 상자 +${r.added} · −${r.removed} · 글/모양 고침 ${r.changed}` })
+  }
   const treeFold = useBuilder((s) => s.treeFold)
   const K = useKey()
   const removePage = useBuilder((s) => s.removePage)
@@ -361,9 +377,9 @@ export default function RightPanel() {
                     onClick={() => { if (!page || selElId == null) return; snapPage(); treeFold(page.id, selElId) }}>
                     {elFolded ? '▸ 펴기' : '▾ 접기'}</button>
                 ) : null}
-                {tree ? <button className="insp-pill" title="이 그림을 머메이드 글로 봅니다" onClick={() => setMmOpen(true)}>머메이드 보기</button> : null}
+                {tree ? <button className="insp-pill" title="이 그림을 머메이드 글로 봅니다 — 고쳐서 적용할 수도 있어요" onClick={openMm}>머메이드 보기</button> : null}
               </div>
-              <span style={cap}>같은 부모의 자식들은 <b>일곱까지 부모 가운데에</b> 맞춰 서고, 그 밖의 상자는 안 움직입니다. {K('mod+Z')} 로 되돌립니다.
+              <span style={cap}>같은 부모의 자식들은 <b>일곱까지 부모 가운데에</b> 맞춰 서고 자손이 있는 형제는 그만큼 벌어집니다 — 열 밖으로 옮긴 상자는 안 움직여요. {K('mod+Z')} 로 되돌립니다.
                 {elKids > 0 ? <> 접은 것은 <b>편집 화면에서만</b> 숨고, 미리보기·발표·내보내기에는 다 펴져 나갑니다.</> : null}</span>
             </>) : null}
             {el.echoOf != null ? (<>
@@ -678,7 +694,7 @@ export default function RightPanel() {
               <button className="insp-pill" title="빈 자리에 선 없는 상자를 하나 만듭니다"
                 onClick={() => { if (!page) return; snapPage(); useBuilder.getState().treeAdd(page.id, null, 'root') }}>＋ 새 상자</button>
               {/* **머메이드 보기**(2026-10-07 2차 4번) — 「어떤 도식화를 하면 그것의 머메이드 소스를 볼 수 있도록」. 지금 그림에서 뽑는다. */}
-              <button className="insp-pill" title="이 그림을 머메이드 글로 봅니다 (복사해 둘 수 있어요)" onClick={() => setMmOpen(true)}>머메이드 보기</button>
+              <button className="insp-pill" title="이 그림을 머메이드 글로 봅니다 — 고쳐서 적용할 수도 있어요" onClick={openMm}>머메이드 보기</button>
               <span className="insp-hint" style={{ margin: 0 }}>지금 뿌리 {tree.roots.length}개</span>
             </div>
             <span style={cap}>상자를 고르면 <b>＋ 자식 · ＋ 형제 · 접기</b>가 나옵니다. 붙여도 있던 상자는 안 움직여요(같은 부모의 자식들만 가운데 맞춤).</span>
@@ -720,15 +736,22 @@ export default function RightPanel() {
           <div className="ax-editwrap"><Editor /></div>
         </div>
       )}
-      {/* 머메이드 소스 창 — 보기만 한다(행동은 「복사」 뿐). 글은 지금 그림에서 뽑는다(cards/mermaidOut). */}
+      {/* 머메이드 소스 창(2026-10-07 2차 4번 → 추가 요청 1) — 지금 그림에서 뽑은 글(cards/mermaidOut)을 **고쳐서 「적용」 하면 그림이 따라온다**(store.applyMermaid).
+          번호(n1 …)가 같은 상자는 자리 · 모양 그대로 · 뺀 번호는 그 상자만 지움 · 새 번호는 부모 옆에 · 선은 글대로. 못 읽는 줄이 있으면 적용하지 않고 몇째 줄인지 말한다. */}
       {mmOpen && page ? (() => {
-        const src = mermaidOfPage(page)
+        const dirty = mmText.trim() !== mermaidOfPage(page).trim()
         return (
           <Modal title="머메이드 소스" onClose={() => setMmOpen(false)} cancel="closeX" size="sm" className="mm-view"
-            footer={<button className="insp-pill" onClick={() => { void navigator.clipboard?.writeText(src) }}>복사</button>}>
-            <textarea className="mm-src" readOnly value={src} rows={Math.min(18, Math.max(6, src.split('\n').length + 1))}
+            footer={<>
+              <button className="insp-pill" onClick={() => { void navigator.clipboard?.writeText(mmText) }}>복사</button>
+              <button className="insp-pill" disabled={!dirty} title={dirty ? '고친 글대로 그림을 바꿉니다' : '아직 고친 데가 없어요'} onClick={applyMm}>적용</button>
+            </>}>
+            <textarea className="mm-src" value={mmText} spellCheck={false} onChange={(e) => { setMmText(e.target.value); setMmNote(null) }}
+              rows={Math.min(18, Math.max(6, mmText.split('\n').length + 1))}
               style={{ width: '100%', fontFamily: 'ui-monospace, Consolas, monospace', fontSize: 12, lineHeight: 1.5, resize: 'vertical' }} />
-            <span style={cap}>지금 그림(상자와 선)에서 뽑은 글이에요. 고르기 창의 「머메이드 LR」에 붙여 넣으면 새 쪽으로 다시 펼칩니다.</span>
+            <span className="mm-note" style={{ ...cap, color: mmNote && mmNote.err ? '#c0392b' : undefined }}>
+              {mmNote ? (mmNote.err || mmNote.ok) : <>지금 그림에서 뽑은 글이에요. 고쳐서 「적용」 하면 그림이 따라와요 — 같은 번호(n1 …)는 자리 그대로 · 새 번호는 부모 옆에 · 뺀 번호는 지워져요. 되돌리기는 {K('mod+Z')}.</>}
+            </span>
           </Modal>
         )
       })() : null}

@@ -14,11 +14,14 @@ const SAFE: Record<string, string> = { '[': '［', ']': '］', '(': '（', ')': 
 const label = (e: FreeEl) => (e.text || '').replace(/\s+/g, ' ').trim().replace(/[\[\](){}|]/g, (c) => SAFE[c])
 const shapeOf = (e: FreeEl): NodeShape => (e.type === 'diamond' ? 'dec' : e.type === 'round' || e.type === 'ellipse' ? 'round' : 'box')
 
+/** 그래프에 드는 요소(선을 달 수 있는 갈래 · echo 아님) — 이 **순서가 곧 번호**(n1 · n2 …)다. 글을 고쳐 적용할 때(store.applyMermaid)도 같은 순서로 맞춘다. */
+export const membersOfPage = (page: Pick<Page, 'els'>): FreeEl[] => page.els.filter((e) => e && e.echoOf == null && !NO_CPT.includes(e.type) && e.type !== 'image')
+
 /** 쪽의 도식(선을 달 수 있는 갈래 전부 + 그 사이 선)을 머메이드 그래프로. 아래 띠의 흐린 상자(echo)는 원본으로 되돌려 읽는다. */
 export function graphOfPage(page: Pick<Page, 'els' | 'conns' | 'treeDir'>): MmGraph {
   const org = new Map<number, number>()
   for (const e of page.els) if (e && e.echoOf != null) org.set(e.id, e.echoOf)
-  const members = page.els.filter((e) => e && e.echoOf == null && !NO_CPT.includes(e.type) && e.type !== 'image')
+  const members = membersOfPage(page)
   const idOf = new Map<number, string>()
   const nodes: Record<string, MmNode> = {}
   const order: string[] = []

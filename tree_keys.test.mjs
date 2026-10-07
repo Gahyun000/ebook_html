@@ -115,18 +115,20 @@ S().setOrientation('landscape')
   const p = cur()
   const B = p.els.find((e) => e.text === '설계' && e.echoOf == null)
   const D = p.els.find((e) => e.text === '개발' && e.echoOf == null)                 // 설계의 자식 — 설계 옆 열에 있다(열 간격 192 = 132 + 60)
-  const kept = new Set(p.els.filter((e) => e.id !== D.id).map((e) => e.id)); const before = posOf(p, kept)
+  const A = p.els.find((e) => e.text === '기획' && e.echoOf == null), M = p.els.find((e) => e.text === '문서' && e.echoOf == null)
+  const kept = new Set([A.id]); const before = posOf(p, kept)
   const k = add(p.id, B.id, 'right')
-  const D2 = cur().els.find((e) => e.id === D.id), B2 = cur().els.find((e) => e.id === B.id)
-  check(posOf(cur(), kept) === before, '머메이드로 펼친 상자들이 **그대로**다 — 설계의 자식 열만 빼고(전에는 전부 다시 앉혔다)')
+  const D2 = cur().els.find((e) => e.id === D.id), B2 = cur().els.find((e) => e.id === B.id), M2 = cur().els.find((e) => e.id === M.id), A2 = cur().els.find((e) => e.id === A.id)
+  check(posOf(cur(), kept) === before, '뿌리(기획)는 **그대로**다(전에는 전부 다시 앉혔다)')
   check(D2.y === B2.y - 28 && k.y === B2.y + 28 && D2.x === k.x, '설계의 자식 열(개발 + 새것)은 **설계 가운데**에 맞춰 선다(3차)', J([B2.y, D2.y, k.y]))
+  // 4차: 설계에 자손이 생겼으니 형제(문서)와의 사이가 그만큼 벌어지고, 둘은 여전히 기획 가운데에
+  check(B2.y === A2.y - 28 && M2.y === A2.y + 56, '설계 · 문서는 자손 범위(94 + 18 + 38)만큼 벌어져 기획 가운데에', J([A2.y, B2.y, M2.y]))
   check(k && cur().conns.some((c) => c.from === B.id && c.to === k.id), '새 상자는 「설계」 에 이어진다')
   check(cur().conns.filter((c) => c.to === k.id).every((c) => c.color === '#8b93a5' && c.width === 2), '머메이드 쪽에 붙인 선도 한 벌 색')
   // 가지째 지워도 · 접어도 다시 앉지 않는다
   const kept2 = new Set(cur().els.filter((e) => e.id !== k.id && e.echoOf == null).map((e) => e.id)); const before2 = posOf(cur(), kept2)
   S().treeRemove(p.id, k.id)
   check(posOf(cur(), kept2) === before2, '가지째 지워도 남은 상자는 제자리')
-  const A = cur().els.find((e) => e.text === '기획' && e.echoOf == null)
   S().treeFold(p.id, A.id)
   check(posOf(cur(), kept2) === before2 && cur().els.filter((e) => e.id !== A.id && e.echoOf == null).every((e) => e.hidden), '접으면 숨기만 하고 자리는 그대로')
   S().treeFold(p.id, A.id)
@@ -147,6 +149,42 @@ S().setOrientation('landscape')
   check(posOf(cur(), kept) === before, '접어도 자리 그대로')
   S().treeFold(p.id, A.id)
   check(cur().els.every((e) => !e.hidden) && posOf(cur(), kept) === before, '펴면 다 보이고 자리 그대로')
+}
+
+// ── 6. 손자가 생기면 형제 사이가 벌어진다(2026-10-07 4차) ─────────────────────────────
+//    사용자: 「child1 계층에서 A,B,C,D,E 를 만들었고 B 에서 child2, C 에서 child2 계층을 만든 경우 얘네 둘이 그림상으로 겹쳐보이는 때가 있음 …
+//    처음 만들때부터 겹치지 않도록 — B,C 사이 간격을 늘인다거나」. 자식을 붙이면 그 가지의 윗대로 올라가며 **형제들을 자손 범위만큼 떼어** 부모 가운데에 다시 세운다.
+{
+  S().addCard('slide'); const p = cur()
+  const R = mkFreeEl('box', 120, 240); R.text = 'R'; S().addEl(p.id, R)              // 가운데 y = 268
+  const at = (id) => cur().els.find((e) => e.id === id)
+  const A = add(p.id, R.id, 'right')
+  const B = add(p.id, A.id, 'sibling'), C = add(p.id, B.id, 'sibling'), D = add(p.id, C.id, 'sibling'), E = add(p.id, D.id, 'sibling')
+  check([A, B, C, D, E].map((k) => at(k.id).y).join() === '92,166,240,314,388', '(준비) 자식 다섯이 뿌리 가운데에', [A, B, C, D, E].map((k) => at(k.id).y).join())
+  const b1 = add(p.id, B.id, 'right'), b2 = add(p.id, b1.id, 'sibling')              // B 의 자식 둘
+  check(overlaps(cur()) === 0, 'B 에 자식 둘 — 겹침 없음(C · D · E 가 아래로 비켜 선다)', J(cur().els.map((e) => [e.text, e.y])))
+  check((at(b1.id).y + at(b2.id).y + 56) / 2 === at(B.id).y + 28, 'B 의 자식 둘은 B 가운데에', J([at(B.id).y, at(b1.id).y, at(b2.id).y]))
+  check(at(C.id).y - (at(b2.id).y + 56) === GAP_STACK, 'B 의 둘째 자식 아래와 C 사이가 꼭 한 칸(18)', J([at(b2.id).y, at(C.id).y]))
+  const c1 = add(p.id, C.id, 'right'), c2 = add(p.id, c1.id, 'sibling')              // C 의 자식 둘 — 사용자가 본 그 겹침
+  check(overlaps(cur()) === 0, 'C 에도 자식 둘 — **B 의 자식과 C 의 자식이 안 겹친다**', J(cur().els.map((e) => [e.text, e.x, e.y])))
+  check(at(c1.id).y - (at(b2.id).y + 56) === GAP_STACK && (at(c1.id).y + at(c2.id).y + 56) / 2 === at(C.id).y + 28, 'C 의 자식은 C 가운데에 · B 의 자식 아래와 한 칸 띄어', J([at(b2.id).y, at(c1.id).y, at(c2.id).y, at(C.id).y]))
+  check([A, B, C, D, E].map((k) => at(k.id).y).join() === '18,129,277,388,462' && [A, B, C, D, E].every((k) => at(k.id).x === at(A.id).x), '형제 다섯이 자손 범위만큼 벌어지고 여전히 뿌리 가운데에', [A, B, C, D, E].map((k) => at(k.id).y).join())
+  const r = at(R.id)
+  check(r.x === 120 && r.y === 240, '뿌리는 제자리')
+  // 손으로 딴 데 옮긴 형제는 벌리기에 안 끼고 건드리지도 않는다
+  S().updateEl(p.id, E.id, { x: 900, y: 640 })
+  add(p.id, D.id, 'right'); add(p.id, D.id, 'right')
+  check(at(E.id).x === 900 && at(E.id).y === 640 && overlaps(cur()) === 0, '옮겨 둔 E 는 그대로 · D 의 자식이 생겨도 겹침 없음', J([at(E.id).x, at(E.id).y]))
+  check([A, B, C, D].map((k) => at(k.id).y).join() === '18,129,277,425', 'E 가 열 밖으로 나가 넷만 센다 — A · B · C · D 가 뿌리 가운데에', [A, B, C, D].map((k) => at(k.id).y).join())
+  // 증손 — b1 에 자식 둘: B 의 범위가 다시 커져(130 + 18 + 56) 형제들이 더 벌어지고, 열이 위로 넘치면 0 에서 시작한다(뿌리는 그대로)
+  const bb1 = add(p.id, b1.id, 'right'), bb2 = add(p.id, bb1.id, 'sibling')
+  check(overlaps(cur()) === 0 && (at(bb1.id).y + at(bb2.id).y + 56) / 2 === at(b1.id).y + 28, '증손 둘 — 겹침 없음 · b1 가운데에', J([at(b1.id).y, at(bb1.id).y, at(bb2.id).y]))
+  check(at(A.id).y === 0 && at(c1.id).y - (at(b2.id).y + 56) === GAP_STACK && at(R.id).y === 240, '열이 위로 넘쳐 0 에서 시작 · B · C 의 자식 열 사이는 여전히 한 칸 · 뿌리 제자리', J([at(A.id).y, at(B.id).y, at(C.id).y, at(D.id).y]))
+  // 열 밖 상자가 새 자리를 막으면 — 줄기 전체 다시 세우기를 포기하고 고른 열만(3차 arrangeColumn) · 그래도 겹침은 없다
+  S().updateEl(p.id, E.id, { x: at(bb1.id).x + 4, y: 0 })
+  const pos0 = posOf(cur(), new Set([A.id, B.id, C.id, D.id].map((k) => k.id)))
+  add(p.id, bb2.id, 'sibling')
+  check(overlaps(cur()) === 0 && posOf(cur(), new Set([A.id, B.id, C.id, D.id].map((k) => k.id))) === pos0, '장애물(옮긴 E)이 막으면 줄기는 그대로 두고 겹침만 피한다', J(cur().els.map((e) => [e.text, e.x, e.y])))
 }
 
 // ── 5. 소스 — 다시 앉히는 길이 스토어에 없다 ─────────────────────────────

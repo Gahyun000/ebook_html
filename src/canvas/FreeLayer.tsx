@@ -936,7 +936,7 @@ export default function FreeLayer({ page, W, H, interactive }: Props) {
         {bending ? <circle cx={bending.x} cy={bending.y} r={6} fill="#fff" stroke="#8b93a5" strokeWidth={2} /> : null}
       </svg>
       {active && marquee ? <div className="marquee" style={{ left: marquee.x, top: marquee.y, width: marquee.w, height: marquee.h }} /> : null}
-      {active && adding ? <div className="conn-hint">빈 곳을 눌러 놓을 자리를 정하세요 · Esc 취소</div> : null}
+      {active && adding ? <div className="conn-hint">점선 안의 빈 곳을 눌러 놓을 자리를 정하세요 · Esc 취소</div> : null}
       {active && tool === 'connect' ? <div className="conn-hint">{connSrc === null ? '이을 도형을 클릭하세요 (첫 번째) · Esc 취소' : '이어줄 다른 도형을 클릭하세요 (두 번째) · Esc 취소'}</div> : null}
       {shownEls.map((el) => {
         const isImg = el.type === 'image'

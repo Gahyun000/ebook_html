@@ -3,6 +3,8 @@ import { cardByKey } from '../cards/registry'
 import { pageSize } from '../cards/sizing'
 import { mindmapParts } from '../cards/mindmapEls'
 import { parseMermaid } from '../cards/mermaid'
+import type { MmError, NodeShape } from '../cards/mermaid'
+import { graphOfPage, membersOfPage } from '../cards/mermaidOut'
 import { treeParts } from '../cards/treeEls'
 import { treeShape, layoutTree, newNode, TREE_CONN } from '../cards/treeOps'
 import { nextSpot, freeSpot, centeredYs, CENTER_MAX, GAP_SIDE, GAP_STACK } from '../canvas/placeNext'
@@ -97,6 +99,11 @@ export interface BuilderState {
    *  **다른 상자는 안 움직인다**(2차 6번) — 다만 같은 부모의 자식 열은 일곱까지 부모 가운데에 맞춰 선다(3차). 뿌리의 형제는 선 없는 또 하나의 뿌리.
    *  새 상자는 고른 상자의 모양 · 크기 · 색을 닮는다. */
   treeAdd: (pageId: number, elId: number | null, kind: 'right' | 'down' | 'up' | 'left' | 'sibling' | 'before' | 'root') => void
+  /** 머메이드 글을 고쳐 **이 쪽의 그림에 적용**한다(2026-10-07 · 추가 요청 1 「여기에서도 소스를 변경을 통해서 수정할 수 있도록」). 번호(n1 … = mermaidOut 의 순서)가
+   *  같은 상자는 자리 · 모양 그대로(글 · 모양은 뽑았던 것과 다를 때만 고침) · 원문에 없는 번호는 그 상자 하나만 지움 · 새 번호는 들어오는 선의 부모 옆에(treeAdd =
+   *  Space 와 같은 자리) 없으면 빈 자리의 뿌리 · 선은 글대로(있던 선의 모양은 그대로 · 새 선은 한 벌). 못 읽는 줄이 있으면 아무것도 안 바꾸고 errors 로 돌려준다.
+   *  되돌리기 한 걸음(pushSnap)은 부르는 쪽이 남긴다. */
+  applyMermaid: (pageId: number, src: string) => { errors: MmError[]; added: number; removed: number; changed: number }
   /** 상자를 **그 아래 가지째** 지운다(알마인드 Delete). 남은 상자는 제자리.
    *  `removeEl` 은 상자 하나와 거기 걸린 선만 지워서, 자손이 선 없는 외톨이 뿌리로 남는다. */
   treeRemove: (pageId: number, elId: number) => void
@@ -142,9 +149,49 @@ export function nextElId(): number { return elUid++ }
  * 그래서 트리를 앉힌 뒤에는 늘 이걸 부른다.
  */
 /**
- * 부모 옆 열에 선 자식들을 `order` 순서로 다시 세운다(2026-10-07 3차). 일곱(CENTER_MAX)까지는 **부모 가운데**에 맞추고(centeredYs),
- * 그게 남과 겹치거나 여덟 이상이면 **맨 위를 고정**하고 아래로 쌓는다. 그것도 겹치면 그대로 둔다(새 상자는 이미 열 끝에 있다).
- * 자식이 움직이면 그 자손도 같은 만큼 따라간다. 부모는 안 움직인다.
+ * 가지를 붙인 뒤 **줄기(고른 상자 → 뿌리)의 열들을 다시 세운다**(2026-10-07 4차 · 사용자: 「child1 계층에서 A,B,C,D,E 를 만들었고 B 에서 child2,
+ * C 에서 child2 계층을 만든 경우 얘네 둘이 겹쳐보이는 때가 있음 … 처음 만들때부터 겹치지 않도록 — B,C 사이 간격을 늘인다거나」).
+ * · 부모 옆 열(nextSpot 이 놓는 x)에 선 상자만 **열 안**으로 친다. 열 안 상자의 **자손 범위**(열 안 자식들까지 합친 높이 = extent)만큼 형제 사이를
+ *   띄우고, 각 상자는 제 범위 가운데에 — 그래서 자식들은 부모 가운데에(3차), 자손이 있는 형제는 그만큼 벌어진다. 일곱(CENTER_MAX)까지는 부모 가운데,
+ *   여덟부터는 맨 위를 고정하고 쌓는다.
+ * · 줄기는 「자식이 부모의 열에 서 있는 동안」 만 올라간다 — 손으로 옮긴 상자(열 밖)와 그 아래는 안 건드리고 **장애물**로만 본다. 뿌리(줄기 맨 위)는
+ *   안 움직인다. 새 자리가 장애물(열 밖 상자 · 다른 그림 · 접힌 것 말고 보이는 것)과 겹치면 통째로 그만두고 고른 상자의 열만 다시 세운다(arrangeColumn).
+ * · 왜 위에서 아래로 한 번에 두나: 열 하나씩 고치면 아직 안 비킨 이웃(B 의 둘째 자식)에 막혀 C 의 자식이 가운데 맞춤을 포기하고 밑으로 처진다.
+ */
+function tidyUp(els: FreeEl[], shape: Shape, hub: FreeEl, side: 'right' | 'left', order: FreeEl[]): FreeEl[] {
+  const byId = new Map(els.map((e) => [e.id, e]))
+  const inCol = (P: FreeEl, k: FreeEl) => (side === 'right' ? Math.abs(k.x - (P.x + P.w + GAP_SIDE)) <= 1 : Math.abs(k.x + k.w - (P.x - GAP_SIDE)) <= 1)
+  const colKids = (P: FreeEl): FreeEl[] => (P.id === hub.id ? order
+    : (shape.kids.get(P.id) || []).map((k) => byId.get(k)).filter((k): k is FreeEl => !!k && !k.hidden && inCol(P, k)).sort((a, b) => a.y - b.y))
+  let top = hub
+  for (let n = 0; n < 99; n++) { const pid = shape.parent.get(top.id); const P = pid != null ? byId.get(pid) : undefined; if (!P || P.hidden || !inCol(P, top)) break; top = P }
+  const ext = new Map<number, number>()
+  const extent = (k: FreeEl): number => {
+    const m = ext.get(k.id); if (m != null) return m
+    const ks = colKids(k); const v = Math.max(k.h, ks.reduce((s, c) => s + extent(c), 0) + GAP_STACK * Math.max(0, ks.length - 1)); ext.set(k.id, v); return v
+  }
+  const subTop = (k: FreeEl): number => Math.min(k.y, ...colKids(k).map(subTop))
+  const ys = new Map<number, number>()
+  const place = (P: FreeEl, cy: number) => {
+    const ks = colKids(P); if (!ks.length) return
+    const hs = ks.map(extent)
+    let starts: number[]
+    if (ks.length <= CENTER_MAX) starts = centeredYs(cy, hs)
+    else { let y = Math.min(...ks.map(subTop)); starts = hs.map((h) => { const v = y; y += h + GAP_STACK; return v }) }
+    ks.forEach((k, i) => { const y = starts[i] + Math.round((hs[i] - k.h) / 2); ys.set(k.id, y); place(k, y + k.h / 2) })
+  }
+  place(top, top.y + top.h / 2)
+  if (![...ys].some(([id, y]) => byId.get(id)!.y !== y)) return els
+  const next = els.map((e) => (ys.has(e.id) ? { ...e, y: ys.get(e.id)! } : e))
+  const still = next.filter((e) => !ys.has(e.id) && !e.hidden)
+  const placed = next.filter((e) => ys.has(e.id))
+  const clash = placed.some((m) => still.some((o) => m.x < o.x + o.w && o.x < m.x + m.w && m.y < o.y + o.h && o.y < m.y + m.h))
+  return clash ? arrangeColumn(els, shape, hub, order) : next
+}
+/**
+ * (대비책 — tidyUp 이 장애물에 막혔을 때) 고른 상자 옆 열의 자식들만 `order` 순서로 다시 세운다(2026-10-07 3차). 일곱(CENTER_MAX)까지는
+ * **부모 가운데**에 맞추고(centeredYs), 그게 남과 겹치거나 여덟 이상이면 **맨 위를 고정**하고 아래로 쌓는다. 그것도 겹치면 그대로 둔다
+ * (새 상자는 이미 열 끝에 있다). 자식이 움직이면 그 자손도 같은 만큼 따라간다. 부모는 안 움직인다.
  */
 function arrangeColumn(els: FreeEl[], shape: Shape, hub: FreeEl, order: FreeEl[]): FreeEl[] {
   if (order.length < 2) return els
@@ -163,6 +210,11 @@ function arrangeColumn(els: FreeEl[], shape: Shape, hub: FreeEl, order: FreeEl[]
   const top = Math.min(...order.map((k) => k.y))
   const stacked: number[] = []; let y = top; for (const h of hs) { stacked.push(y); y += h + GAP_STACK }
   return attempt(stacked) ?? els
+}
+/** 머메이드 모양(`[ ]` box · `( )` round · `{ }` dec)을 상자 종류로 — 이미 그 모양이면(둥근 상자든 타원이든) 안 건드린다. */
+function typePatch(shape: NodeShape, el: FreeEl): Partial<FreeEl> {
+  const now: NodeShape = el.type === 'diamond' ? 'dec' : el.type === 'round' || el.type === 'ellipse' ? 'round' : 'box'
+  return now === shape ? {} : { type: shape === 'dec' ? 'diamond' : shape === 'round' ? 'round' : 'box' }
 }
 function claimIds(els: FreeEl[]): void { for (const e of els) if (e && e.id >= elUid) elUid = e.id + 1 }
 // 새 페이지의 필드는 빈칸으로 시작한다.
@@ -451,7 +503,8 @@ export const useBuilder = create<BuilderState>((set, get) => ({
       // 명단이 비어 있으면(손으로 이은 쪽에서 처음 붙였다) 지금의 뿌리를 적는다 — 그래야 이 쪽이 트리 쪽으로 읽힌다.
       const marked = roots.length ? roots : treeShape([...p.els, node], conns, known).roots
       let els = [...p.els, node]
-      // **같은 열의 자식들은 부모 가운데에**(2026-10-07 3차 · 사용자: 「자식 7개 정도까지는 가능한한 중간에 위치 … 지금은 축 쳐져서 밑으로 내려가는 느낌」).
+      // **같은 열의 자식들은 부모 가운데에**(2026-10-07 3차 · 사용자: 「자식 7개 정도까지는 가능한한 중간에 위치 … 지금은 축 쳐져서 밑으로 내려가는 느낌」),
+      // **자손이 생기면 형제 사이가 그만큼 벌어진다**(4차 · tidyUp — 줄기의 열들을 위에서 아래로 다시 세운다).
       // 부모 옆 열(nextSpot 이 놓는 x)에 선 자식들(새 상자 포함)만 — 손으로 다른 데로 옮긴 자식은 안 건드린다. 형제는 고른 상자 **바로 뒤**(앞 형제는 바로 앞)에 끼운다.
       if (side === 'right' || side === 'left') {
         const shape2 = treeShape(els, conns, known)
@@ -462,11 +515,79 @@ export const useBuilder = create<BuilderState>((set, get) => ({
         const order = kind === 'sibling' && i >= 0 ? [...col.slice(0, i + 1), node, ...col.slice(i + 1)]
           : kind === 'before' && i >= 0 ? [...col.slice(0, i), node, ...col.slice(i)]
           : [...col, node]
-        els = arrangeColumn(els, shape2, hub, order)
+        els = tidyUp(els, shape2, hub, side, order)
       }
       return { ...p, els, conns, treeRoots: marked, treeRoot: marked[0] ?? p.treeRoot, treeDir: p.treeDir || 'LR' }
     }) }
   }),
+  applyMermaid: (pageId, src) => {
+    const g = parseMermaid(src)
+    const none = { added: 0, removed: 0, changed: 0 }
+    if (g.errors.length) return { errors: g.errors, ...none }
+    const page0 = get().pages.find((p) => p.id === pageId)
+    if (!page0) return { errors: [{ line: 0, text: '쪽이 없다' }], ...none }
+    const before = graphOfPage(page0)
+    const elOf = new Map<string, number>()
+    membersOfPage(page0).forEach((e, i) => elOf.set('n' + (i + 1), e.id))
+    const pageNow = () => get().pages.find((p) => p.id === pageId)!
+    let added = 0, removed = 0, changed = 0
+    // ① 원문에 없는 번호 — 그 상자 하나(와 흐린 상자 · 그 선)만 걷는다. 가지째가 아니다 — 자식은 원문이 정한 대로 남는다.
+    const gone = new Set<number>()
+    for (const [id, elId] of [...elOf]) if (!g.nodes[id]) { gone.add(elId); elOf.delete(id); removed++ }
+    if (gone.size) set((s) => ({ pages: mapPage(s.pages, pageId, (p) => {
+      for (const e of p.els) if (e.echoOf != null && gone.has(e.echoOf)) gone.add(e.id)
+      const known = (p.treeRoots || []).filter((r) => !gone.has(r))
+      return { ...p, els: p.els.filter((e) => !gone.has(e.id)), conns: p.conns.filter((c) => c && !gone.has(c.from) && !gone.has(c.to)), treeRoots: known, treeRoot: known[0] }
+    }) }))
+    // ② 새 번호 — 원문 순서대로. 들어오는 선의 from 이 아는 상자면 그 옆에(treeAdd = Space 와 같은 자리 · 닮기 · 열 다시 세우기), 아니면 빈 자리의 뿌리.
+    const side = page0.treeDir === 'TD' ? 'down' : 'right'
+    for (const id of g.order) {
+      if (elOf.has(id)) continue
+      const pe = g.edges.find((e) => e.to === id && e.from !== id && elOf.has(e.from))
+      const had = new Set(pageNow().els.map((e) => e.id))
+      get().treeAdd(pageId, pe ? elOf.get(pe.from)! : null, pe ? side : 'root')
+      const made = pageNow().els.find((e) => !had.has(e.id) && e.echoOf == null)
+      if (!made) continue
+      elOf.set(id, made.id); added++
+      get().updateEl(pageId, made.id, { text: g.nodes[id].label, ...typePatch(g.nodes[id].shape, made) })
+    }
+    // ③ 글 · 모양 — **뽑았던 것과 다를 때만**(괄호를 전각으로 바꿔 뽑으므로, 안 고친 상자의 반각 괄호가 전각으로 바뀌면 안 된다).
+    for (const [id, elId] of elOf) {
+      const n = g.nodes[id], b = before.nodes[id]; if (!n || !b) continue
+      const el = pageNow().els.find((e) => e.id === elId); if (!el) continue
+      const patch: Partial<FreeEl> = { ...(n.shape !== b.shape ? typePatch(n.shape, el) : {}) }
+      if (n.label !== b.label) patch.text = n.label
+      if (Object.keys(patch).length) { get().updateEl(pageId, elId, patch); changed++ }
+    }
+    // ④ 선 — 원문의 선은 있게(있던 선은 모양 그대로 · 새 선은 한 벌), 원문에 없는 선(두 끝이 다 그림 상자인 것)은 없게. 그림 밖 선(이미지 등)은 그대로.
+    //    선 없는 상자(외톨이)는 명단에 적어 트리 쪽에 남긴다(treeShape 의 known).
+    set((s) => ({ pages: mapPage(s.pages, pageId, (p) => {
+      const org = new Map<number, number>(); for (const e of p.els) if (e.echoOf != null) org.set(e.id, e.echoOf)
+      const ids = new Set(elOf.values())
+      const want = new Set(g.edges.filter((e) => e.from !== e.to && elOf.has(e.from) && elOf.has(e.to)).map((e) => elOf.get(e.from) + '>' + elOf.get(e.to)))
+      const have = new Set<string>()
+      const conns = p.conns.filter((c) => {
+        if (!c) return false
+        const a = org.get(c.from) ?? c.from, b = org.get(c.to) ?? c.to
+        if (!ids.has(a) || !ids.has(b)) return true
+        const k = a + '>' + b
+        if (!want.has(k) || have.has(k)) return false
+        have.add(k); return true
+      })
+      const byId = new Map(p.els.map((e) => [e.id, e]))
+      for (const k of want) {
+        if (have.has(k)) continue
+        const [a, b] = k.split('>').map(Number); const A = byId.get(a), B = byId.get(b); if (!A || !B) continue
+        conns.push({ from: a, to: b, ...TREE_CONN, axis: B.x >= A.x + A.w || B.x + B.w <= A.x ? 'h' : 'v' })
+      }
+      const linked = new Set<number>(); for (const c of conns) { linked.add(org.get(c.from) ?? c.from); linked.add(org.get(c.to) ?? c.to) }
+      const roots = [...(p.treeRoots || [])]
+      for (const id of ids) if (!linked.has(id) && !roots.includes(id)) roots.push(id)
+      const marked = roots.length ? roots : treeShape(p.els, conns, roots).roots
+      return { ...p, conns, treeRoots: marked, treeRoot: marked[0] ?? p.treeRoot, treeDir: p.treeDir || 'LR' }
+    }) }))
+    return { errors: [], added, removed, changed }
+  },
   treeRemove: (pageId, elId) => set((s) => {
     return { pages: mapPage(s.pages, pageId, (p) => {
       const known = p.treeRoots || (p.treeRoot != null ? [p.treeRoot] : [])
