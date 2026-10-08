@@ -523,3 +523,12 @@
   color:var(--ax-blue-d);background:var(--ax-blue-100);border:1px solid #cddcf5;
   border-radius:999px;padding:0 6px;line-height:16px;height:17px;pointer-events:none;white-space:nowrap}
 
+/* AI 마인드맵 만들기 창(2026-10-08 · builder/MindmapMaker). 껍데기는 ui/Modal, 여기는 안쪽만. */
+.mm-maker .mm-src{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--ax-line);border-radius:10px;margin-bottom:6px;font-size:13px;color:var(--ax-ink);cursor:pointer}
+.mm-maker .mm-src em{margin-left:auto;font-style:normal;font-size:11.5px;color:var(--ax-muted)}
+.mm-maker .mm-paste{margin-top:10px}
+.mm-maker .mm-paste-h{display:flex;align-items:center;justify-content:space-between;font-size:12px;font-weight:700;color:var(--ax-muted);margin-bottom:6px}
+.mm-maker .mm-text{width:100%;box-sizing:border-box;height:150px;resize:vertical;border:1px solid var(--ax-line);border-radius:10px;padding:9px 11px;font:inherit;font-size:12.5px;line-height:1.55;color:var(--ax-ink)}
+.mm-maker .mm-note{font-size:11.5px;color:#b4541a;margin-top:5px}
+.mm-maker .mm-sum{margin-top:10px;font-size:12px;color:var(--ax-muted)}
+.mm-maker .mm-warn{margin:0;padding-left:18px;font-size:12.5px;color:#b4541a}

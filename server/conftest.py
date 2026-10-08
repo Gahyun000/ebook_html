@@ -4,6 +4,7 @@ collect_ignore = [
     "test_edit_lane.py",
     "test_editor.py",
     "test_planner.py",
+    "test_mindmap.py",
     "test_self_check.py",
     "test_settings_store.py",
     "deck/test_deck_theme_sync.py",

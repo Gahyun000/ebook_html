@@ -2014,6 +2014,108 @@ STAGES.push(['14단계 · 도형 UX(불편점 1~10)', async () => {
     ok('[경계] 도형을 들면 **종이 가장자리가 점선**으로 보이고, Esc 로 내려놓으면 사라진다', armed === 'dashed' && (await outline()) === 'none', `${armed} → ${await outline()}`) }
 }])
 
+// ── 15단계 ────────────────────────────────────────────────
+// 2026-10-08 · **AI 마인드맵**(server/test_mindmap.py · outline_tree · source_text.test.mjs). 노트북LM 처럼 자료를 읽어
+// 「주제 → 큰 가지 → 하위 가지」 를 새 슬라이드에 편집되는 트리로 펼치고, 가지를 골라 챗봇에 묻는다.
+// **검사는 실제 LLM 에 기대지 않는다** — /api/mindmap · /api/mindmap/ask 를 가로채 정해 둔 답을 준다(보낸 글은 확인한다).
+STAGES.push(['15단계 · AI 마인드맵', async () => {
+  await freshBook()
+  await deselect()
+  await panel6().locator('.insp-row.seg button', { hasText: '가로' }).click(); await p.waitForTimeout(300)
+  const OUT = { title: '스마트 공장', children: [
+    { title: '설비', children: [{ title: '성형기' }, { title: '공조' }] },
+    { title: '품질', children: [{ title: '불량률' }] },
+    { title: '인력' } ] }
+  let sent = null, asked = null, mode = 'ok'
+  await p.route('**/api/mindmap', async (route) => {
+    sent = JSON.parse(route.request().postData() || '{}')
+    if (mode === 'down') return route.fulfill({ json: { ok: false, reason: 'llm_unavailable', message: 'LLM 이 연결되어 있지 않아요. 환경설정에서 LLM 주소 · 키 · 사용자 ID · 모델을 넣어 주세요.', outline: null, digest: '', stats: {}, warnings: [] } })
+    return route.fulfill({ json: { ok: true, outline: OUT, digest: '근거 글 본문', stats: { chars_total: 30, chars_used: 30, chunks: 1, truncated: false }, warnings: mode === 'warn' ? ['자료가 길어 앞 64,000자만 읽었어요(전체 70,000자).'] : [], reason: null } })
+  })
+  await p.route('**/api/mindmap/ask', async (route) => {
+    asked = JSON.parse(route.request().postData() || '{}')
+    return route.fulfill({ json: { ok: true, answer: '성형기는 설비의 하나로, 자료에는 온도와 압력을 본다고 적혀 있습니다.', reason: null } })
+  })
+  const n0 = await thumbs.count()
+  const maker = () => p.locator('.ui-modal.mm-maker')
+
+  // 문 — 카드 고르기의 「AI 마인드맵」
+  const pop = await openPicker()
+  await pop.locator('.cpk-ai').click(); await p.waitForTimeout(300)
+  ok('[AI 마인드맵] 카드 고르기의 「✨ AI 마인드맵」 이 만들기 창을 연다', (await maker().count()) === 1 && (await p.locator('.cpk-pop').count()) === 0)
+  ok('[AI 마인드맵] 자료가 없으면 만들기 단추가 잠겨 있다(빈 스케치)', await maker().locator('.mm-go').isDisabled())
+  // PDF 는 받지 않는다
+  await maker().locator('input[type=file]').setInputFiles({ name: '보고서.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4') })
+  await p.waitForTimeout(200)
+  ok('[AI 마인드맵] **PDF 는 받지 않고** 글로 붙여 넣으라고 말한다', /글로/.test(await maker().locator('.mm-note').innerText().catch(() => '')) && await maker().locator('.mm-go').isDisabled())
+  await maker().locator('input[type=file]').setInputFiles({ name: '회의록.txt', mimeType: 'text/plain', buffer: Buffer.from('스마트 공장은 설비와 품질과 인력으로 나뉜다.', 'utf8') })
+  await p.waitForTimeout(250)
+  ok('[AI 마인드맵] 글 파일은 붙여 넣는 칸에 들어온다', /스마트 공장은/.test(await maker().locator('.mm-text').inputValue()))
+  ok('[AI 마인드맵] 읽을 글자 수를 보여 주고 단추가 풀린다', /읽을 자료/.test(await maker().locator('.mm-sum').innerText()) && !(await maker().locator('.mm-go').isDisabled()))
+
+  // LLM 이 안 될 때 — 지어내지 않고 사유를 말한다
+  mode = 'down'
+  await maker().locator('.mm-go').click(); await p.waitForTimeout(400)
+  ok('[AI 마인드맵] LLM 이 안 되면 **창에 사유가 뜨고 쪽은 안 생긴다**', /환경설정/.test(await maker().innerText()) && (await thumbs.count()) === n0, String(await thumbs.count()))
+  mode = 'ok'
+  await maker().locator('.mm-go').click(); await p.waitForTimeout(600)
+  ok('[AI 마인드맵] 보낸 것은 **고른 자료의 글**이다', !!sent && /스마트 공장은 설비와 품질/.test(sent.text || ''), JSON.stringify(sent).slice(0, 80))
+  ok('[AI 마인드맵] 창이 닫히고 **새 슬라이드**가 생긴다', (await maker().count()) === 0 && (await thumbs.count()) === n0 + 1, `${n0} → ${await thumbs.count()}`)
+  const texts = async () => (await layer().locator('.fel').allInnerTexts()).map((t) => t.trim())
+  const t1 = await texts()
+  ok('[AI 마인드맵] 처음에는 **주제와 큰 가지만** 보인다(하위는 접힘)', JSON.stringify(t1.slice().sort()) === JSON.stringify(['스마트 공장', '설비', '품질', '인력'].sort()), t1.join(','))
+  ok('[AI 마인드맵] 큰 가지마다 선이 이어져 있다', (await layer().locator('svg.freeconn path[marker-end]').count()) === 3, String(await layer().locator('svg.freeconn path[marker-end]').count()))
+  if (SHOT_DIR) { await deselect(); await p.locator('.ax-stage-wrap').screenshot({ path: SHOT_DIR + '/s9/stage15_mindmap_folded.png' }) }
+
+  // 접힌 가지를 편다 — 겹치지 않는다
+  await deselect()
+  await layer().locator('.fel', { hasText: '설비' }).first().click(); await p.waitForTimeout(200)
+  await panel6().locator('.insp-pill', { hasText: '펴기' }).click(); await p.waitForTimeout(300)
+  const t2 = await texts()
+  ok('[AI 마인드맵] 큰 가지를 펴면 하위 가지가 나온다', t2.includes('성형기') && t2.includes('공조') && !t2.includes('불량률'), t2.join(','))
+  const rects = await layer().locator('.fel').evaluateAll((ns) => ns.map((n) => [parseFloat(n.style.left), parseFloat(n.style.top), parseFloat(n.style.width), parseFloat(n.style.height)]))
+  let over = 0
+  for (let i = 0; i < rects.length; i++) for (let j = i + 1; j < rects.length; j++) { const a = rects[i], c = rects[j]; if (a[0] < c[0] + c[2] && c[0] < a[0] + a[2] && a[1] < c[1] + c[3] && c[1] < a[1] + a[3]) over++ }
+  ok('[AI 마인드맵] 편 뒤에도 겹침 없음', over === 0, String(over))
+  // 손으로 고친다 — 가지 키가 그대로
+  await deselect()
+  await layer().locator('.fel', { hasText: '공조' }).first().click(); await p.waitForTimeout(200)
+  await p.keyboard.press('Space'); await p.waitForTimeout(400)
+  await p.keyboard.type('환기'); await p.keyboard.press('Enter'); await p.waitForTimeout(250)
+  ok('[AI 마인드맵] 만든 지도에 **Space 로 가지를 더 붙인다**', (await texts()).includes('환기'), (await texts()).join(','))
+
+  // 가지를 챗봇에 묻는다
+  await deselect()
+  await layer().locator('.fel', { hasText: '성형기' }).first().click(); await p.waitForTimeout(250)
+  ok('[챗봇에 묻기] AI 로 만든 쪽의 상자에는 「💬 챗봇에 묻기」 가 있다', (await panel6().locator('.mm-ask').count()) === 1)
+  await panel6().locator('.mm-ask').click(); await p.waitForTimeout(700)
+  ok('[챗봇에 묻기] 챗봇 자리가 열린다', (await p.locator('.chat-panel.open').count()) === 1)
+  ok('[챗봇에 묻기] **뿌리부터의 경로와 근거 글**을 보낸다', !!asked && JSON.stringify(asked.path) === JSON.stringify(['스마트 공장', '설비', '성형기']) && asked.digest === '근거 글 본문', JSON.stringify(asked))
+  const chat = await p.locator('.chat-panel .chat-messages').innerText()
+  ok('[챗봇에 묻기] 내 질문과 답이 대화에 붙는다', /스마트 공장 › 설비 › 성형기/.test(chat) && /온도와 압력을 본다고/.test(chat), chat.slice(-120))
+  if (SHOT_DIR) await p.screenshot({ path: SHOT_DIR + '/s9/stage15_mindmap_ask.png' })
+  await p.locator('.chat-panel.open button[title="닫기"]').first().click().catch(() => {})
+  await p.waitForTimeout(250)
+
+  // 손으로 만든 쪽에는 「챗봇에 묻기」 가 없다(근거 글이 없다)
+  await thumbs.first().click(); await p.waitForTimeout(200)
+  await p.keyboard.press('r'); const lb = await layer().boundingBox(); await p.mouse.click(lb.x + 200, lb.y + 200); await p.waitForTimeout(250)
+  ok('[챗봇에 묻기] 손으로 만든 쪽의 상자에는 없다(근거 글이 없다)', (await panel6().locator('.mm-ask').count()) === 0)
+
+  // 못 읽은 부분이 있으면 창을 닫지 않고 알린다 · 삽입 메뉴의 문
+  mode = 'warn'
+  await deselect()
+  await p.locator('.ax-menu button.m', { hasText: '삽입' }).first().click(); await p.waitForTimeout(200)
+  await p.locator('.ax-mdrop .ax-mitem', { hasText: 'AI 마인드맵' }).click(); await p.waitForTimeout(300)
+  ok('[AI 마인드맵] 「삽입」 메뉴에도 문이 있다', (await maker().count()) === 1)
+  ok('[AI 마인드맵] 슬라이드에 글이 있으면 「슬라이드 전체」 가 재료로 골라져 있다', await maker().locator('.mm-src input').first().isChecked())
+  await maker().locator('.mm-go').click(); await p.waitForTimeout(600)
+  ok('[AI 마인드맵] 보낸 글에 **슬라이드의 글**이 들어 있다', !!sent && /\[슬라이드 \d+\]/.test(sent.text || '') && /성형기/.test(sent.text || ''), (sent.text || '').slice(0, 80))
+  ok('[AI 마인드맵] **못 읽은 부분이 있으면 창을 닫지 않고 알린다**', (await maker().count()) === 1 && /64,000자만/.test(await maker().innerText()))
+  await maker().locator('.ui-modal-cancel').click(); await p.waitForTimeout(250)
+  await p.unroute('**/api/mindmap'); await p.unroute('**/api/mindmap/ask')
+}])
+
 // ONLY=5단계 처럼 주면 그 이름이 든 단계만 돈다(고치는 동안 빨리 돌리려고). 비우면 전부.
 const ONLY = process.env.ONLY || ''
 for (const [name, run] of STAGES) {

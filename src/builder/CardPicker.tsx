@@ -196,6 +196,8 @@ export default function CardPicker() {
                   「＋ 빈 슬라이드」는 그대로 둔다(사용자 요청). 없앤 자리를 비워 두지 않고
                   빈 슬라이드가 폭을 다 쓴다 — 단추가 하나인데 반만 차 있으면 빠진 것처럼 보인다. */}
               <button className="cpk-q" onClick={() => pick('slide')}>＋ 빈 슬라이드</button>
+              {/* **AI 마인드맵**(2026-10-08) — 자료를 읽어 트리로 펼친다. 재료를 고르는 창은 Layout 이 띄운다(builder/MindmapMaker). */}
+              <button className="cpk-q cpk-ai" onClick={() => { close(); window.dispatchEvent(new CustomEvent('ebook:mindmap')) }}>✨ AI 마인드맵</button>
             </div>
             <input className="cpk-search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="카드 검색 (예: 머메이드, 메모)" aria-label="카드 검색" autoFocus />
             {GROUPS.map((g) => {

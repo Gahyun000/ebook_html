@@ -67,6 +67,8 @@ export default function MenuBar({ onHelp, onTutorial, onNotes, onSettings, onImp
       // 메뉴와 도구줄이 다른 길을 쓰면 한쪽만 고쳐지는 날이 온다.
       { label: 'T  텍스트 상자', run: () => place('text') },
       { label: '🖼  이미지', run: () => emit('ebook:insert-image') },
+      // 자료를 읽어 새 슬라이드에 트리로 펼친다(2026-10-08 · builder/MindmapMaker).
+      { label: '✨ AI 마인드맵', run: () => emit('ebook:mindmap') },
       // **도구줄의 도형 팝업을 연다**(EVER-SKETCH1 b1911d3). 전에는 사각형 하나를 무장시켰는데,
       // 팝업에는 열네 가지가 있어서 같은 이름이 두 곳에서 다른 말을 했다.
       // 목록을 여기에도 적지 않는다 — 두 벌이 되면 한쪽만 는다.

@@ -25,6 +25,7 @@ import { applyUiAction } from '../chat/actions'
 import DemoPlayer from './DemoPlayer'
 import InsertPicker from './InsertPicker'
 import AiCleanup from './AiCleanup'
+import MindmapMaker from './MindmapMaker'
 import { useRef, useEffect } from 'react'
 import { useBuilder } from '../state/store'
 import { hasUnsavedChanges, useAutosave } from '../persistence/autosave'
@@ -122,6 +123,17 @@ export default function Layout() {
     const notes = () => setSide('notes')
     window.addEventListener('ebook:notes-slide', notes)
     return () => window.removeEventListener('ebook:notes-slide', notes)
+  }, [])
+
+  // **AI 마인드맵**(2026-10-08) — 만들기 창을 띄우는 문(카드 고르기 · 삽입 메뉴)과, 가지를 챗봇에 물을 때 챗봇 자리를 여는 일.
+  // 질문 자체는 챗봇이 같은 사건을 듣고 처리한다(ChatPanel).
+  const [mind, setMind] = useState(false)
+  useEffect(() => {
+    const openMaker = () => setMind(true)
+    const ask = () => setSide('chat')
+    window.addEventListener('ebook:mindmap', openMaker)
+    window.addEventListener('ebook:mind-ask', ask)
+    return () => { window.removeEventListener('ebook:mindmap', openMaker); window.removeEventListener('ebook:mind-ask', ask) }
   }, [])
 
   useEffect(() => {
@@ -227,6 +239,7 @@ export default function Layout() {
     <DemoPlayer open={demo} onClose={() => setDemo(false)} />
     <InsertPicker />
     <AiCleanup open={ai} onClose={() => setAi(false)} />
+    <MindmapMaker open={mind} onClose={() => setMind(false)} />
     {confirmSave ? <ConfirmSaveModal req={confirmSave} onClose={() => setConfirmSave(null)} /> : null}
   </div>)
 }

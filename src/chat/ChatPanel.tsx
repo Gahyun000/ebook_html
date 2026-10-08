@@ -214,6 +214,36 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ isOpen, onClose, onNotes, screenC
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, busy]);
 
+  // **AI 마인드맵의 가지를 묻는다**(2026-10-08). 오른쪽 패널의 「챗봇에 묻기」 가 경로와 근거 글을 보낸다.
+  // 일반 챗 경로(/chat/v2)로 보내지 않는다 — 거기는 문구를 편집 명령으로 읽을 수 있고, 근거 글을 모른다.
+  const busyRef = useRef(false);
+  busyRef.current = busy;
+  useEffect(() => {
+    const onAsk = (ev: Event) => {
+      const d = (ev as CustomEvent<{ path?: string[]; digest?: string }>).detail;
+      const path = (d && d.path) || [];
+      if (!path.length || busyRef.current) return;
+      setView('chat');
+      setMessages((prev) => [...prev, { role: 'user', text: `「${path.join(' › ')}」 를 자료에 근거해 설명해 줘`, ts: Date.now() }]);
+      setBusy(true);
+      void (async () => {
+        let text = '';
+        try {
+          const res = await fetch(`${API_BASE}/mindmap/ask`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path, digest: (d && d.digest) || '' }) });
+          const data = await res.json() as { ok?: boolean; answer?: string; message?: string };
+          text = data.ok && data.answer ? data.answer : (data.message || '답을 받지 못했어요. 잠시 뒤 다시 물어봐 주세요.');
+        } catch {
+          text = '서버에 닿지 못했어요. 서버가 떠 있는지 확인해 주세요.';
+        }
+        setMessages((prev) => [...prev, { role: 'assistant', text, ts: Date.now() }]);
+        setBusy(false);
+      })();
+    };
+    window.addEventListener('ebook:mind-ask', onAsk);
+    return () => window.removeEventListener('ebook:mind-ask', onAsk);
+  }, []);
+
   // 새로고침 후 이어가기: 저장된 sessionId가 있으면 그 대화 기록을 한 번 복원.
   const restoredRef = useRef(false);
   useEffect(() => {

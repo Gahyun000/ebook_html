@@ -6,6 +6,8 @@ import { parseMermaid } from '../cards/mermaid'
 import type { MmError, NodeShape } from '../cards/mermaid'
 import { graphOfPage, membersOfPage } from '../cards/mermaidOut'
 import { treeParts } from '../cards/treeEls'
+import { outlineParts } from '../cards/outlineTree'
+import type { Outline } from '../cards/outlineTree'
 import { treeShape, layoutTree, newNode, TREE_CONN } from '../cards/treeOps'
 import { nextSpot, freeSpot, centeredYs, CENTER_MAX, GAP_SIDE, GAP_STACK } from '../canvas/placeNext'
 import type { Side } from '../canvas/placeNext'
@@ -60,7 +62,10 @@ export interface Page { id: number; cardKey: string; fields: Record<string, stri
   treeDir?: 'LR' | 'TD'
   /** 트리를 만든 **머메이드 원문.** 그림을 고쳐도 이건 안 고친다 —
    *  「처음에 무엇을 쳤는가」의 기록이고, 다시 펼치고 싶을 때 되돌아갈 자리다. */
-  treeSrc?: string }
+  treeSrc?: string
+  /** **AI 마인드맵의 근거 글**(2026-10-08). 이 쪽의 트리를 만들 때 LLM 이 읽은 글(긴 자료는 뽑아 둔 요점).
+   *  가지를 챗봇에 물을 때 이 글에 비추어 답하게 한다 — 없으면 「챗봇에 묻기」 단추가 안 나온다. */
+  mindSrc?: string }
 export interface CanvasData { els: FreeEl[]; conns: Conn[]; strokes: Stroke[]; detached?: string[] }
 export interface BuilderState {
   title: string; orientation: Orientation; font: string; size: SizePreset; theme: ThemeName
@@ -98,6 +103,9 @@ export interface BuilderState {
    *  `sibling`(형제 — 같은 부모 · 고른 상자 바로 아래 · Enter) · `before`(앞 형제 · Shift+Enter) · `root`(고른 것 없이 빈 자리).
    *  **다른 상자는 안 움직인다**(2차 6번) — 다만 같은 부모의 자식 열은 일곱까지 부모 가운데에 맞춰 선다(3차). 뿌리의 형제는 선 없는 또 하나의 뿌리.
    *  새 상자는 고른 상자의 모양 · 크기 · 색을 닮는다. */
+  /** **AI 마인드맵**(2026-10-08): 서버가 검증해 준 개요를 새 슬라이드에 트리로 펼친다. 고른 쪽 바로 뒤에 끼우고,
+   *  `digest`(근거 글)를 쪽에 적어 둔다. 되돌리기는 쪽 추가와 같은 문서 단위 한 걸음이다. */
+  addOutline: (outline: Outline, digest: string) => void
   treeAdd: (pageId: number, elId: number | null, kind: 'right' | 'down' | 'up' | 'left' | 'sibling' | 'before' | 'root') => void
   /** 머메이드 글을 고쳐 **이 쪽의 그림에 적용**한다(2026-10-07 · 추가 요청 1 「여기에서도 소스를 변경을 통해서 수정할 수 있도록」). 번호(n1 … = mermaidOut 의 순서)가
    *  같은 상자는 자리 · 모양 그대로(글 · 모양은 뽑았던 것과 다를 때만 고침) · 원문에 없는 번호는 그 상자 하나만 지움 · 새 번호는 들어오는 선의 부모 옆에(treeAdd =
@@ -456,6 +464,16 @@ export const useBuilder = create<BuilderState>((set, get) => ({
   addStroke: (pageId, stroke) => set((s) => ({ pages: mapPage(s.pages, pageId, (p) => ({ ...p, strokes: [...p.strokes, stroke] })) })),
   reorderEl: (pageId, elId, toFront) => set((s) => ({ pages: mapPage(s.pages, pageId, (p) => { const i = p.els.findIndex((e) => e.id === elId); if (i < 0) return p; const els = [...p.els]; const e = els.splice(i, 1)[0]; if (toFront) els.push(e); else els.unshift(e); return { ...p, els } }) })),
   setCanvas: (pageId, data) => set((s) => ({ pages: mapPage(s.pages, pageId, (p) => ({ ...p, els: data.els, conns: data.conns, strokes: data.strokes, ...(data.detached !== undefined ? { detached: data.detached } : {}) })) })),
+  addOutline: (outline, digest) => {
+    const g = get(); pushDocSnap(docSnap(g.pages, g.selectedPageId))
+    set((s) => {
+      const { els, conns, rootId } = outlineParts(outline, nextElId)
+      const mp: Page = { id: uid++, cardKey: 'slide', fields: {}, free: true, els, conns, strokes: [], blocks: [], bg: '',
+                         treeRoot: rootId, treeRoots: [rootId], treeDir: 'LR', mindSrc: digest || '' }
+      const next = slideSpot(s.pages, s.selectedPageId)
+      return { pages: [...s.pages.slice(0, next), mp, ...s.pages.slice(next)], selectedPageId: mp.id }
+    })
+  },
   treeAdd: (pageId, elId, kind) => set((s) => {
     const { W, H } = pageSize(s.orientation)
     return { pages: mapPage(s.pages, pageId, (p) => {

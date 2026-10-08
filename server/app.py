@@ -424,7 +424,12 @@ class SummReq(BaseModel):
     sections: List[SummSection]
 
 
-def _llm_chat(messages: list, max_tokens: int = 512, temperature: float = 0.2) -> str:
+class LlmCutOff(RuntimeError):
+    """LLM 이 출력 한도(max_tokens)에서 잘려 **본문이 빈** 답을 줬다. 추론형 모델이 「생각」 에 한도를 다 쓴 경우다
+    (2026-10-08 실측 · gemma4:26b). 빈 글로 돌려주면 부르는 쪽이 「연결 안 됨」 과 구별하지 못한다."""
+
+
+def _llm_chat(messages: list, max_tokens: int = 512, temperature: float = 0.2, min_timeout: float = 0) -> str:
     """저장된 LLM 설정으로 게이트웨이를 1회 호출해 텍스트를 받는다(요약용).
     api_key 는 서버 설정(DB/env)에서만 읽는다 — 코드/응답에 노출하지 않는다."""
     s = load_llm_settings()
@@ -452,12 +457,16 @@ def _llm_chat(messages: list, max_tokens: int = 512, temperature: float = 0.2) -
     data = json.dumps(body).encode("utf-8")
     req = urllib.request.Request(url, data=data, headers=headers, method="POST")
     timeout = float(s.get("timeout") or 45)
-    with urllib.request.urlopen(req, timeout=min(timeout, 90.0)) as resp:
+    with urllib.request.urlopen(req, timeout=max(min(timeout, 90.0), min_timeout)) as resp:
         raw = resp.read().decode("utf-8", "replace")
     j = json.loads(raw)
     if provider == "anthropic":
         return (j.get("content", [{}])[0] or {}).get("text", "") or ""
-    return (((j.get("choices") or [{}])[0]).get("message") or {}).get("content", "") or ""
+    choice = (j.get("choices") or [{}])[0]
+    content = (choice.get("message") or {}).get("content", "") or ""
+    if not content.strip() and choice.get("finish_reason") == "length":
+        raise LlmCutOff("출력 한도(%d)에서 잘려 본문이 비었습니다" % max_tokens)
+    return content
 
 
 def _extract_json(text: str):
@@ -526,6 +535,73 @@ def plan(req: PlanIn):
             return None
 
     return planner.make_plan(req.brief, llm_fn, req.book_state, retries=req.retries)
+
+
+# ───────────────────────── AI 마인드맵 — 자료 → 계층 개요 · 가지 설명 ─────────────────────────
+class MindmapIn(BaseModel):
+    text: str = ""
+    title: str = ""
+
+
+class MindAskIn(BaseModel):
+    digest: str = ""
+    path: list[str] = []
+
+
+def _mind_llm(max_tokens: int):
+    """마인드맵 하네스에 줄 llm_fn 과, 마지막 오류를 담는 칸. 401 · 403 뒤에는 **다시 부르지 않는다**
+    (403 금지어는 같은 글로 재시도하지 말라는 것이 게이트웨이 규약이다)."""
+    from server.intent import mindmap as mm
+    err: dict = {}
+
+    def fn(msgs: list) -> Optional[str]:
+        if err.get("fatal"):
+            return None
+        try:
+            return _llm_chat(msgs, max_tokens=max_tokens, temperature=0.3, min_timeout=mm.LLM_WAIT)
+        except LlmCutOff as e:
+            err.update(code="length", detail=str(e), fatal=False)   # 다시 불러 볼 만하다(mindmap.is_fatal 참고)
+        except urllib.error.HTTPError as e:
+            try:
+                detail = e.read().decode("utf-8", "replace")[:300]
+            except Exception:
+                detail = ""
+            err.update(code=e.code, detail=detail, fatal=mm.is_fatal(e.code))
+        except Exception as e:  # noqa: BLE001 — 연결 실패 · 시간 초과 · 형식 오류
+            err.update(code=0, detail=str(e)[:200], fatal=False)
+        return None
+
+    return fn, err
+
+
+@app.post("/api/mindmap")
+def mindmap_make(req: MindmapIn):
+    """자료(글) → 검증된 마인드맵 개요. 그리기(트리 요소)는 프론트가 한다. LLM 이 안 되면 사유를 말한다 — 지어내지 않는다."""
+    from server.intent import mindmap as mm
+    if not load_llm_settings().get("configured"):
+        return {"ok": False, "reason": "llm_unavailable", "message": mm.explain_error(None, ""),
+                "outline": None, "digest": "", "stats": {}, "warnings": []}
+    fn, err = _mind_llm(mm.OUTLINE_TOKENS)
+    out = mm.make_mindmap(req.text, fn, req.title)
+    if not out["ok"]:
+        out["message"] = ("만들 자료가 비어 있어요." if out["reason"] == "empty"
+                          else "LLM 이 마인드맵 형식으로 답하지 못했어요. 다시 만들어 주세요." if out["reason"] == "bad_format"
+                          else mm.explain_error(err.get("code", 0), err.get("detail", "")))
+    return out
+
+
+@app.post("/api/mindmap/ask")
+def mindmap_ask(req: MindAskIn):
+    """마인드맵의 한 가지를 근거 글(digest)에 비추어 설명한다."""
+    from server.intent import mindmap as mm
+    if not load_llm_settings().get("configured"):
+        return {"ok": False, "answer": "", "reason": "llm_unavailable", "message": mm.explain_error(None, "")}
+    fn, err = _mind_llm(mm.ASK_TOKENS)
+    out = mm.ask_branch(req.digest, req.path, fn)
+    if not out["ok"]:
+        out["message"] = ("물어볼 가지가 없어요." if out["reason"] == "empty"
+                          else mm.explain_error(err.get("code", 0), err.get("detail", "")))
+    return out
 
 
 # ───────────────────────── (G5) 편집 명령 → 부분 수정 계획(edits/adds) ─────────────────────────

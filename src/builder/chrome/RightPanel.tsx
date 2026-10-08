@@ -379,6 +379,21 @@ export default function RightPanel() {
                 ) : null}
                 {tree ? <button className="insp-pill" title="이 그림을 머메이드 글로 봅니다 — 고쳐서 적용할 수도 있어요" onClick={openMm}>머메이드 보기</button> : null}
               </div>
+              {/* **가지를 챗봇에 묻는다**(2026-10-08 · AI 마인드맵). 근거 글(`mindSrc`)이 있는 쪽 — AI 로 만든 지도 — 에서만 나온다.
+                  뿌리부터 이 상자까지의 경로를 보내고, 챗봇이 그 근거 글에 비추어 설명한다(ChatPanel 의 ebook:mind-ask). */}
+              {page && page.mindSrc && tree ? (
+                <div className="insp-row">
+                  <button className="insp-pill mm-ask" title="이 가지를 자료에 근거해 설명해 달라고 챗봇에 묻습니다"
+                    onClick={() => {
+                      const path: string[] = []
+                      for (let id: number | undefined = el.echoOf ?? el.id, n = 0; id != null && n < 50; id = tree.parent.get(id), n++) {
+                        const t = (page.els.find((e) => e.id === id)?.text || '').trim()
+                        if (t) path.unshift(t)
+                      }
+                      if (path.length) window.dispatchEvent(new CustomEvent('ebook:mind-ask', { detail: { path, digest: page.mindSrc } }))
+                    }}>💬 챗봇에 묻기</button>
+                </div>
+              ) : null}
               <span style={cap}>같은 부모의 자식들은 <b>일곱까지 부모 가운데에</b> 맞춰 서고 자손이 있는 형제는 그만큼 벌어집니다 — 열 밖으로 옮긴 상자는 안 움직여요. {K('mod+Z')} 로 되돌립니다.
                 {elKids > 0 ? <> 접은 것은 <b>편집 화면에서만</b> 숨고, 미리보기·발표·내보내기에는 다 펴져 나갑니다.</> : null}</span>
             </>) : null}
